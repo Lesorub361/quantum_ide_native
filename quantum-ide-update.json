@@ -1,16 +1,16 @@
 {
-  "versionCode": 4,
-  "versionName": "1.0.3",
-  "notes": "## 🚀 QuantumIDE Native v1.0.3\n\n### Критический фикс `Permission denied` в `$PREFIX/bin/*` (`mkdir`, `rm`, `grep`, `pkg`, `git`)\n- **`targetSdk = 28`** (как в Termux, Leostryx и Antigravity) при `compileSdk = 36`: снимает блокировку SELinux W^X на Android 10–16, из-за которой любые бинарники в `/data/user/0/.../files/usr/bin/*` падали с `Permission denied`.\n- **`project_requirements_service.dart`**: автоустановка зависимостей проекта теперь транслирует `/root`, `/tmp` и `apt-get` в `$HOME`, `$TMPDIR` и `pkg install`.",
+  "versionCode": 5,
+  "versionName": "1.0.4",
+  "notes": "## 🚀 QuantumIDE Native v1.0.4\n\n### Полная синхронизация со скриптами окружения Leostryx\n- **Встроены overlay-скрипты и сертификаты из `Leostrange/Leostryx`**: `agy-fix-paths`, `agy-fix-flutter`, `etc/profile`, `etc/profile.d/00-env.sh`, `etc/profile.d/65-agy-jvm.sh`, `etc/tls/cert.pem`, `etc/tls/openssl.cnf`, `etc/resolv.conf`, `etc/hosts`.\n- **Исправлены переменные для `libtermux-exec.so` и `git`/`Java`**: `TERMUX__PREFIX`, `TERMUX__ROOTFS`, `TERMUX_APP__DATA_DIR`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `OPENSSL_CONF`, `JAVA_TOOL_OPTIONS` (исправляет `user.home`, `java.io.tmpdir` и SSL trustStore для Gradle/SDK) и `trap '' 36 37` для стабильности на Android 16.",
   "artifacts": {
     "online": {
-      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.3/app-arm64-v8a-release.apk",
+      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.4/app-arm64-v8a-release.apk",
       "sha256": "",
       "sizeBytes": 0
     }
   },
-  "version": "1.0.3",
-  "buildNumber": 4,
-  "tag_name": "v1.0.3",
-  "releaseNotes": "Исправлена ошибка Permission denied для всех утилит в $PREFIX/bin (mkdir, rm, grep, pkg, git) за счёт targetSdk = 28 (как в Termux/Leostryx) и адаптации project_requirements_service под pkg."
+  "version": "1.0.4",
+  "buildNumber": 5,
+  "tag_name": "v1.0.4",
+  "releaseNotes": "Синхронизированы overlay-скрипты Leostryx (agy-fix-paths, agy-fix-flutter, 00-env.sh, 65-agy-jvm.sh, cert.pem, openssl.cnf) и переменные TERMUX__PREFIX / GIT_EXEC_PATH / JAVA_TOOL_OPTIONS."
 }

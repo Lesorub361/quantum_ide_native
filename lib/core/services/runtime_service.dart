@@ -240,6 +240,32 @@ class RuntimeService extends ChangeNotifier {
         p.join(usrDir.path, 'lib', 'pkg', name),
       );
     }
+
+    // Leostryx overlay scripts, profile.d (TERMUX__PREFIX, JVM/Gradle truststore), and TLS certs
+    await copyAsset(
+      'assets/native_env/overlay/bin/agy-fix-paths',
+      p.join(usrDir.path, 'bin', 'agy-fix-paths'),
+      exec: true,
+    );
+    await copyAsset(
+      'assets/native_env/overlay/bin/agy-fix-flutter',
+      p.join(usrDir.path, 'bin', 'agy-fix-flutter'),
+      exec: true,
+    );
+    for (final rel in const [
+      'etc/hosts',
+      'etc/resolv.conf',
+      'etc/profile',
+      'etc/profile.d/00-env.sh',
+      'etc/profile.d/65-agy-jvm.sh',
+      'etc/tls/cert.pem',
+      'etc/tls/openssl.cnf',
+    ]) {
+      await copyAsset(
+        'assets/native_env/overlay/$rel',
+        p.join(usrDir.path, rel),
+      );
+    }
   }
 
   /// Downloads and extracts the lightweight ARM64 userspace bootstrap (~44 MB)
@@ -3015,6 +3041,9 @@ if [ -f "\$CONFIG/native_userspace_mode.flag" ]; then
     export HOME="\$FILES_DIR"
     export TMPDIR="\$FILES_DIR/tmp"
     export TEMP="\$FILES_DIR/tmp"
+    export TERMUX__PREFIX="\$PREFIX"
+    export TERMUX__ROOTFS="/"
+    export TERMUX_APP__DATA_DIR="\$FILES_DIR"
     export TERM="xterm-256color"
     export COLORTERM="truecolor"
     export LANG="C.UTF-8"
@@ -3025,11 +3054,17 @@ if [ -f "\$CONFIG/native_userspace_mode.flag" ]; then
     export PATH="\$PREFIX/bin:\$FILES_DIR/bin:\$HOME/flutter/bin:\$HOME/android-sdk/cmdline-tools/latest/bin:\$HOME/android-sdk/platform-tools:/system/bin:/vendor/bin"
     export LD_LIBRARY_PATH="\$PREFIX/lib:\$PROOT_LIB_DIR"
     export GIT_CONFIG_NOSYSTEM=1
+    export GIT_ATTR_NOSYSTEM=1
+    export GIT_TEMPLATE_DIR="\$PREFIX/share/git-core/templates"
+    export GIT_EXEC_PATH="\$PREFIX/libexec/git-core"
+    export OPENSSL_CONF="\$PREFIX/etc/tls/openssl.cnf"
     if [ -f "\$PREFIX/etc/tls/cert.pem" ]; then
         export SSL_CERT_FILE="\$PREFIX/etc/tls/cert.pem"
         export CURL_CA_BUNDLE="\$PREFIX/etc/tls/cert.pem"
         export GIT_SSL_CAINFO="\$PREFIX/etc/tls/cert.pem"
     fi
+    trap '' 36 37 2>/dev/null || true
+    [ -r "\$PREFIX/etc/profile.d/65-agy-jvm.sh" ] && . "\$PREFIX/etc/profile.d/65-agy-jvm.sh" 2>/dev/null || true
     if [ -f "\$PROOT_LIB_DIR/libtermux-exec.so" ]; then
         export LD_PRELOAD="\$PROOT_LIB_DIR/libtermux-exec.so"
     fi
@@ -3712,6 +3747,9 @@ fi
         'PREFIX': prefix,
         'TMPDIR': nativeTmp,
         'TEMP': nativeTmp,
+        'TERMUX__PREFIX': prefix,
+        'TERMUX__ROOTFS': '/',
+        'TERMUX_APP__DATA_DIR': _filesDir,
         'TERM': 'xterm-256color',
         'COLORTERM': 'truecolor',
         'ANDROID_HOME': p.join(_filesDir, 'android-sdk'),
@@ -3722,6 +3760,13 @@ fi
         'LD_LIBRARY_PATH': '$prefix/lib:$_nativeLibDir',
         if (preload.isNotEmpty) 'LD_PRELOAD': preload,
         'GIT_CONFIG_NOSYSTEM': '1',
+        'GIT_ATTR_NOSYSTEM': '1',
+        'GIT_TEMPLATE_DIR': '$prefix/share/git-core/templates',
+        'GIT_EXEC_PATH': '$prefix/libexec/git-core',
+        'SSL_CERT_FILE': '$prefix/etc/tls/cert.pem',
+        'CURL_CA_BUNDLE': '$prefix/etc/tls/cert.pem',
+        'GIT_SSL_CAINFO': '$prefix/etc/tls/cert.pem',
+        'OPENSSL_CONF': '$prefix/etc/tls/openssl.cnf',
         'LANG': 'C.UTF-8',
         'LC_ALL': 'C.UTF-8',
       };

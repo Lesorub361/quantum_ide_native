@@ -1,7 +1,7 @@
 name: quantum_ide
 description: "QuantumIDE - A next-generation AI-powered mobile IDE for web development built with Flutter."
 publish_to: 'none'
-version: 1.0.3+4
+version: 1.0.4+5
 
 environment:
   sdk: ^3.11.4
@@ -91,6 +91,10 @@ flutter:
     - assets/native_env/pkg/
     - assets/native_env/pkg/lib/
     - assets/native_env/etc/pkg/
+    - assets/native_env/overlay/bin/
+    - assets/native_env/overlay/etc/
+    - assets/native_env/overlay/etc/profile.d/
+    - assets/native_env/overlay/etc/tls/
   fonts:
     - family: firaCode
       fonts:
