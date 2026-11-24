@@ -1,4 +1,4 @@
-#!/data/user/0/com.agyru.t2/files/usr/bin/bash
+#!/data/user/0/com.example.quantum_ide_native/files/usr/bin/bash
 # db.sh -- installed-package database. One .meta + one .files per package.
 
 db_meta()  { printf '%s/%s.meta'  "$PKG_DB" "$1"; }

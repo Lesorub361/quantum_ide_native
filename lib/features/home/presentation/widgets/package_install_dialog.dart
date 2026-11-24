@@ -202,6 +202,23 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
           '(pkg update || true) && pkg install $directPkg';
     }
 
+    if (packageId.toLowerCase() == 'flutter') {
+      return 'export HOME="$filesDir" PREFIX="$prefix" TMPDIR="$nativeTmp" '
+          'PATH="$prefix/bin:$filesDir/bin:$filesDir/flutter/bin:\$PATH"; '
+          'mkdir -p "$nativeTmp" "$prefix/bin" 2>/dev/null || true; '
+          '(pkg update || true) && pkg install git curl unzip xz-utils ca-certificates && '
+          'git config --global --add safe.directory "*" 2>/dev/null || true; '
+          'if [ -d "$filesDir/flutter/.git" ]; then '
+          '  cd "$filesDir/flutter" && git fetch --depth 1 origin stable && git checkout stable -f; '
+          'else '
+          '  rm -rf "$filesDir/flutter" && git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$filesDir/flutter"; '
+          'fi && '
+          'ln -sf "$filesDir/flutter/bin/flutter" "$prefix/bin/flutter" && '
+          'ln -sf "$filesDir/flutter/bin/dart" "$prefix/bin/dart" && '
+          '([ -x "$prefix/bin/agy-fix-flutter" ] && "$prefix/bin/agy-fix-flutter" || true) && '
+          'echo "✓ Flutter SDK установлен в $filesDir/flutter"';
+    }
+
     var adapted = command;
     const lockMarker = 'ca-certificates 2>/dev/null || true ; ';
     if (adapted.contains(lockMarker)) {
@@ -236,13 +253,13 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
       RegExp(
         r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+update(?:\s+-[a-zA-Z]+)*\s*&&\s*(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
       ),
-      (m) => '(pkg update || true) && pkg install ${m.group(1)!.trim()}',
+      (m) => '(pkg update || true) && pkg install ${m.group(1)!.trim()} ',
     );
     adapted = adapted.replaceAllMapped(
       RegExp(
         r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
       ),
-      (m) => 'pkg install ${m.group(1)!.trim()}',
+      (m) => 'pkg install ${m.group(1)!.trim()} ',
     );
 
     return 'export HOME="$filesDir" PREFIX="$prefix" TMPDIR="$nativeTmp" '

@@ -1,4 +1,4 @@
-#!/data/user/0/com.agyru.t2/files/usr/bin/bash
+#!/data/user/0/com.example.quantum_ide_native/files/usr/bin/bash
 # util.sh -- shared helpers for pkg.
 
 PKG_VERSION="0.1.0"
