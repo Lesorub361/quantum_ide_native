@@ -11,53 +11,50 @@ enum DevStack {
   web(
     'Web (JavaScript / TypeScript)',
     'Websites and web apps with HTML, CSS, and JS frameworks.',
-    'Уже в образе: Node.js, npm, Git',
-    ['node', 'npm', 'git'],
-    isPreinstalled: true,
+    'Устанавливается через pkg: nodejs, git',
+    ['nodejs', 'git'],
   ),
   python(
     'Python',
     'Scripts, automation, data work, and Python backends.',
-    'Python 3 в образе; доустанавливается: pip, venv',
-    ['python3', 'python3-pip', 'python3-venv'],
-    isPreinstalled: true,
+    'Устанавливается через pkg: python',
+    ['python'],
   ),
   android(
-    'Android / Flutter (JDK 17)',
-    'Build Android APK/AAB and Flutter projects directly on device.',
-    'JDK 17 и Flutter в образе; доустанавливается при необходимости',
-    ['openjdk-17-jdk-headless', 'gradle', 'flutter'],
-    isPreinstalled: true,
+    'Java 17 & Gradle (Android)',
+    'Build Android APK/AAB and Java/Kotlin projects directly on device.',
+    'Устанавливается через pkg: openjdk-17, gradle',
+    ['openjdk-17', 'gradle'],
   ),
   java21(
     'Java 21 (OpenJDK 21 LTS)',
     'Modern Java 21 for AGP 8.5+, Gradle 8.10+, and Spring Boot.',
-    'Доустанавливается: openjdk-21-jdk-headless',
-    ['openjdk-21-jdk-headless'],
+    'Устанавливается через pkg: openjdk-21',
+    ['openjdk-21'],
   ),
   cpp(
     'C / C++',
     'Fast compiled programs, algorithms, and systems code.',
-    'Clang/CMake в образе; доустанавливается: gcc, g++, make, gdb',
-    ['gcc', 'g++', 'make', 'cmake', 'gdb'],
+    'Устанавливается через pkg: clang, make, cmake',
+    ['clang', 'make', 'cmake'],
   ),
   go(
     'Go (Golang)',
     'Fast CLI tools, microservices, and backend APIs.',
-    'Доустанавливается: golang-go',
-    ['golang-go'],
+    'Устанавливается через pkg: golang',
+    ['golang'],
   ),
   rust(
     'Rust (rustc + cargo)',
     'Systems programming, CLI, and WebAssembly.',
-    'Доустанавливается: rustc, cargo',
-    ['rustc', 'cargo'],
+    'Устанавливается через pkg: rust',
+    ['rust'],
   ),
   php(
     'PHP',
     'Websites and apps with PHP — classic sites and Laravel projects.',
-    'Доустанавливается: php-cli, composer',
-    ['php-cli', 'composer'],
+    'Устанавливается через pkg: php',
+    ['php'],
   );
 
   final String label;
@@ -176,43 +173,25 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
     _addLog('Selected dev stacks: ${_selectedStacks.map((s) => s.name).join(', ')}');
 
     try {
-      _addLog('Initializing QuantumIDE runtime environment...');
-      await runtime.setUseNativeRootMode(false);
+      _addLog('Initializing QuantumIDE Native ARM64 Userspace (Leostryx .so + pkg)...');
+      await runtime.setUseNativeUserspaceMode(true, installIfMissing: true);
       await runtime.init();
 
       if (!runtime.isInitialized) {
         throw Exception(runtime.status.startsWith('Error:') ? runtime.status : 'Runtime initialization failed: ${runtime.status}');
       }
 
-      _addLog('Runtime core prepared successfully.');
-      _addLog('Setting up packages for selected toolchains...');
+      _addLog('✓ Native ARM64 Userspace готов (без Ubuntu и без PRoot).');
 
-      final candidateAptPackages = <String>{};
+      final pkgList = <String>{};
       for (final stack in _selectedStacks) {
-        _addLog('Configuring stack: ${stack.label} (${stack.packages.join(', ')})');
-        for (final pkg in stack.packages) {
-          if (pkg != 'node' && pkg != 'npm' && pkg != 'git' && pkg != 'flutter' && pkg != 'gradle') {
-            candidateAptPackages.add(pkg);
-          }
-        }
+        _addLog('Selected stack: ${stack.label} (${stack.packages.join(', ')})');
+        pkgList.addAll(stack.packages);
       }
 
-      final aptPackages = <String>[];
-      if (candidateAptPackages.isNotEmpty) {
-        _addLog('Checking packages already present in rootfs image...');
-        for (final pkg in candidateAptPackages) {
-          final checkRes = await runtime.runCommand('dpkg -s $pkg >/dev/null 2>&1 && echo INSTALLED || echo MISSING');
-          if (checkRes.contains('INSTALLED')) {
-            _addLog('✓ $pkg already pre-installed in image — skipped');
-          } else {
-            aptPackages.add(pkg);
-          }
-        }
-      }
-
-      if (aptPackages.isNotEmpty) {
-        _addLog('Installing missing toolchain packages: ${aptPackages.join(' ')}...');
-        final cmd = 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y --no-install-recommends ${aptPackages.join(' ')}';
+      if (pkgList.isNotEmpty) {
+        _addLog('Installing selected packages via pkg: ${pkgList.join(' ')}...');
+        final cmd = '(pkg update || true) && pkg install ${pkgList.join(' ')}';
         _addLog('\$ $cmd');
         final job = runtime.runCommandStream(
           cmd,
@@ -223,12 +202,12 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
         );
         final code = await job.exitCode;
         if (code == 0) {
-          _addLog('✓ Toolchain packages installed successfully.');
+          _addLog('✓ Пакеты успешно установлены через pkg.');
         } else {
-          _addLog('⚠ apt exited with code $code (packages can be installed later from Packages)');
+          _addLog('⚠ pkg завершился с кодом $code (пакеты можно доустановить позже в разделе Пакеты)');
         }
       } else {
-        _addLog('✓ All selected packages are already present in the image.');
+        _addLog('✓ Базовая среда готова.');
       }
 
       _addLog('Setup completed! Loading workspace...');
@@ -495,7 +474,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'QuantumIDE Setup',
+                    'QuantumIDE Native Setup',
                     style: GoogleFonts.inter(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -503,7 +482,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                     ),
                   ),
                   Text(
-                    'Guided Private Development Runtime',
+                    'Native ARM64 Userspace (Leostryx .so + pkg)',
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       color: theme.colorScheme.onSurfaceVariant,
@@ -530,8 +509,8 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 Expanded(
                   child: Text(
                     _useNativeRootKernel
-                        ? 'Режим: Прямой запуск на ядре устройства (Root / Без Ubuntu)'
-                        : 'Environment: ${Platform.operatingSystem.toUpperCase()} · Rootfs Ubuntu 24.04 ready',
+                        ? 'Режим: Прямой запуск на ядре устройства (Root / su)'
+                        : 'Environment: ${Platform.operatingSystem.toUpperCase()} · Native ARM64 Userspace (~44 МБ, без Ubuntu)',
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
@@ -581,7 +560,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                           Row(
                             children: [
                               Icon(
-                                LucideIcons.box,
+                                LucideIcons.rocket,
                                 size: 16,
                                 color: !_useNativeRootKernel
                                     ? theme.colorScheme.primary
@@ -590,7 +569,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  'Ubuntu 24.04 (PRoot)',
+                                  'Native ARM64 (Leostryx + pkg)',
                                   style: GoogleFonts.inter(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w700,
@@ -602,7 +581,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Скачивание контейнера Ubuntu (не требует Root)',
+                            'Лёгкий нативный userspace ~44 МБ (без Ubuntu, PRoot и Root)',
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: theme.colorScheme.onSurfaceVariant,
@@ -669,8 +648,8 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                           const SizedBox(height: 4),
                           Text(
                             _hasRootAccess
-                                ? '✓ Root активен: запуск без скачивания Ubuntu'
-                                : 'Напрямую на ядре устройства без скачивания Ubuntu',
+                                ? '✓ Root активен: прямой доступ к ядру (su)'
+                                : 'Напрямую на ядре устройства (требуется Root/su)',
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: _hasRootAccess
@@ -690,7 +669,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
 
           if (!_useNativeRootKernel) ...[
             Text(
-              'Select Development Stacks',
+              'Select Development Stacks (pkg)',
               style: GoogleFonts.inter(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -699,7 +678,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              'В образ уже вшиты: Git, Node.js, Python 3, Clang/CMake, JDK 17 и Flutter. Выберите, что нужно доустановить (уже установленное пропустится автоматически):',
+              'Выберите пакеты для установки через встроенный пакетный менеджер pkg (можно пропустить и доустановить позже):',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 color: theme.colorScheme.onSurfaceVariant,
@@ -733,8 +712,8 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
               children: [
                 Text(
                   _useNativeRootKernel
-                      ? 'Запустить на своём ядре (Без скачивания Ubuntu)'
-                      : 'Install & Launch Runtime',
+                      ? 'Запустить на своём ядре (Root)'
+                      : 'Установить Native ARM64 (~44 МБ) и запустить',
                   style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 8),

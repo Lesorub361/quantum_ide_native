@@ -3137,7 +3137,7 @@ class _RoxumChatPanelState extends ConsumerState<RoxumChatPanel> {
                             subtitle: Text(
                               runtime.useNativeRootMode
                                   ? 'Активно: команды и терминал работают напрямую на ядре устройства (Root/su)'
-                                  : 'Выключено: используется песочница Ubuntu 24.04 (PRoot)',
+                                  : 'Выключено: используется Native ARM64 Userspace (Leostryx + pkg)',
                               style: const TextStyle(fontSize: 11.5),
                             ),
                             dense: true,
