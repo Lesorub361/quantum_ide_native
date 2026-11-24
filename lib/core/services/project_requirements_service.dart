@@ -245,7 +245,25 @@ class ProjectRequirementsService {
     for (final pkg in packages) {
       commands.add('echo ">>> Установка: ${pkg.name}..."');
       String cmd = pkg.command;
-      if (!Platform.isAndroid) {
+      if (Platform.isAndroid) {
+        cmd = cmd
+            .replaceAll('/root/', '\$HOME/')
+            .replaceAll('/root', '\$HOME')
+            .replaceAll('/tmp/', '\$TMPDIR/')
+            .replaceAll('/usr/local/bin', '\$PREFIX/bin')
+            .replaceAllMapped(
+              RegExp(
+                r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+update(?:\s+-[a-zA-Z]+)*\s*&&\s*(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
+              ),
+              (m) => '(pkg update || true) && pkg install ${m.group(1)!.trim()}',
+            )
+            .replaceAllMapped(
+              RegExp(
+                r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
+              ),
+              (m) => 'pkg install ${m.group(1)!.trim()}',
+            );
+      } else {
         cmd = cmd.replaceAll('apt install', 'sudo apt install');
       }
       commands.add('($cmd)');

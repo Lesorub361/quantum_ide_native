@@ -42,7 +42,9 @@ android {
         applicationId = "com.example.quantum_ide_native"
         // libghostty (flterm) требует shm_open из libc — в Bionic с Android 8 (API 26).
         minSdk = 26
-        targetSdk = 36 // Современный стандарт
+        // targetSdk = 28 (как в Termux/Leostryx/AGY) обязателен для Native ARM64 Userspace:
+        // Android 10+ (targetSdk >= 29) блокирует execve() бинарников в $filesDir/usr/bin (SELinux W^X).
+        targetSdk = 28
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true

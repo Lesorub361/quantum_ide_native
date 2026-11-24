@@ -1,16 +1,16 @@
 {
-  "versionCode": 3,
-  "versionName": "1.0.2",
-  "notes": "## 🚀 QuantumIDE Native v1.0.2\n\n### Обновлён экран первичной настройки (`QuantumIDE Native Setup`)\n- Убраны все упоминания **Ubuntu 24.04 (PRoot)** и `apt-get` на экране настройки (`bootstrap_page.dart`).\n- Режим по умолчанию теперь явно отображается как **Native ARM64 (Leostryx + pkg)** (~44 МБ, без Ubuntu, PRoot и Root).\n- Выбор стеков (Node.js, Python, OpenJDK 17/21, Clang/CMake, Go, Rust, PHP) теперь ставит пакеты напрямую через встроенный **`pkg update && pkg install`**.",
+  "versionCode": 4,
+  "versionName": "1.0.3",
+  "notes": "## 🚀 QuantumIDE Native v1.0.3\n\n### Критический фикс `Permission denied` в `$PREFIX/bin/*` (`mkdir`, `rm`, `grep`, `pkg`, `git`)\n- **`targetSdk = 28`** (как в Termux, Leostryx и Antigravity) при `compileSdk = 36`: снимает блокировку SELinux W^X на Android 10–16, из-за которой любые бинарники в `/data/user/0/.../files/usr/bin/*` падали с `Permission denied`.\n- **`project_requirements_service.dart`**: автоустановка зависимостей проекта теперь транслирует `/root`, `/tmp` и `apt-get` в `$HOME`, `$TMPDIR` и `pkg install`.",
   "artifacts": {
     "online": {
-      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.2/app-arm64-v8a-release.apk",
+      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.3/app-arm64-v8a-release.apk",
       "sha256": "",
       "sizeBytes": 0
     }
   },
-  "version": "1.0.2",
-  "buildNumber": 3,
-  "tag_name": "v1.0.2",
-  "releaseNotes": "Обновлён экран QuantumIDE Native Setup: убраны все упоминания Ubuntu PRoot и apt-get, выбор стеков устанавливает пакеты через нативный pkg."
+  "version": "1.0.3",
+  "buildNumber": 4,
+  "tag_name": "v1.0.3",
+  "releaseNotes": "Исправлена ошибка Permission denied для всех утилит в $PREFIX/bin (mkdir, rm, grep, pkg, git) за счёт targetSdk = 28 (как в Termux/Leostryx) и адаптации project_requirements_service под pkg."
 }
