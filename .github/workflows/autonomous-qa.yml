@@ -1,0 +1,85 @@
+name: Autonomous QA & Android Self-Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Запуск каждую ночь в 03:00 UTC для автоматического тестирования
+    - cron: '0 3 * * *'
+  pull_request:
+    branches: [main]
+
+jobs:
+  autonomous_test:
+    name: Run APK in Android Emulator & Collect Logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.50.0'
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Patch plugins for AGP 9 (proguard-android.txt is unsupported)
+        run: |
+          grep -rlE "proguard-android\.txt" "$HOME/.pub-cache/hosted" --include=build.gradle --include=build.gradle.kts 2>/dev/null | while read -r f; do
+            echo "Patching $f"
+            sed -i "s/proguard-android\.txt/proguard-android-optimize.txt/g" "$f"
+          done || true
+
+      - name: Build Debug APK for Emulator
+        env:
+          GRADLE_OPTS: "-Xmx1024m -Dfile.encoding=UTF-8"
+        run: |
+          sed -i '/org.gradle.jvmargs/d' android/gradle.properties
+          sed -i '/kotlin.compiler.execution.strategy/d' android/gradle.properties
+          sed -i '/android.aapt2.daemon/d' android/gradle.properties
+          sed -i 's/org.gradle.daemon=.*/org.gradle.daemon=true/g' android/gradle.properties
+          sed -i 's/android.aapt2FromMaven=.*/android.aapt2FromMaven=true/g' android/gradle.properties
+          printf 'org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8\nkotlin.compiler.execution.strategy=daemon\n' >> android/gradle.properties
+          flutter build apk --debug --no-tree-shake-icons
+
+      - name: Enable KVM hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run APK on Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          script: |
+            python3 scripts/autonomous_server_daemon.py --mode=adb --apk=build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Upload QA Reports & Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantum-qa-reports
+          path: .quantum/qa_reports/
+          retention-days: 7
+
+      - name: Publish Step Summary
+        if: always()
+        run: |
+          if [ -f .quantum/qa_reports/README_LATEST_REPORT.md ]; then
+            cat .quantum/qa_reports/README_LATEST_REPORT.md >> $GITHUB_STEP_SUMMARY
+          fi

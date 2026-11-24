@@ -1,0 +1,1353 @@
+{
+  "appTitle": "QuantumIDE",
+  "explorer": "Explorateur",
+  "newFile": "New File",
+  "newFolder": "New Folder",
+  "refresh": "Actualiser",
+  "rename": "Renommer",
+  "delete": "Supprimer",
+  "cancel": "Annuler",
+  "save": "Enregistrer",
+  "create": "Créer",
+  "projectNotOpened": "Projet non ouvert",
+  "selectFileToStart": "Sélectionnez un fichier dans l'explorateur pour commencer",
+  "openExplorer": "Ouvrir l'explorateur",
+  "confirmDelete": "Confirmer la suppression",
+  "terminal": "Terminal",
+  "run": "Exécuter",
+  "build": "Bâtir",
+  "aiAgent": "Agent IA",
+  "servers": "Serveurs",
+  "settings": "Paramètres",
+  "interfaceAndLocalization": "Interface & Localisation",
+  "language": "Langue",
+  "theme": "Thème",
+  "darkTheme": "Thème sombre",
+  "lightTheme": "Thème clair",
+  "colorPalette": "Palette de couleurs",
+  "accentColor": "Couleur d'accentuation",
+  "codeEditor": "Éditeur de code",
+  "editorFontSize": "Taille de police de l'éditeur",
+  "autoCompletion": "Saisie automatique",
+  "wordWrap": "Retour à la ligne",
+  "lineNumbers": "Numéros de ligne",
+  "minimap": "Minicarte",
+  "autoSave": "Sauvegarde automatique",
+  "terminalFontSize": "Taille de police du terminal",
+  "terminalTheme": "Thème du terminal",
+  "toolsAndAi": "Outils & IA",
+  "aiProviders": "Fournisseurs d'IA",
+  "ubuntuPackages": "Paquets Ubuntu",
+  "system": "System",
+  "aboutApp": "À propos de l'application",
+  "close": "Close",
+  "resetToDefault": "Réinitialiser",
+  "noProjects": "Aucun projet",
+  "createFirstProject": "Créer le premier projet",
+  "projectSettings": "Paramètres du projet",
+  "createProject": "Créer un projet",
+  "projectName": "Nom du projet",
+  "projectType": "TYPE DE PROJET",
+  "saveAction": "Enregistrer",
+  "code": "Code",
+  "preview": "Aperçu",
+  "chat": "Chat",
+  "agents": "Agents",
+  "send": "Envoyer",
+  "problems": "Problèmes",
+  "packages": "Paquets",
+  "tools": "Outils",
+  "searchFiles": "Rechercher des fichiers...",
+  "unsaved": "Non enregistré",
+  "saved": "Enregistré",
+  "glassmorphismEffects": "Effets de verre (Glassmorphism)",
+  "glassOpacity": "Opacité du verre",
+  "backdropBlur": "Flou d'arrière-plan",
+  "editorFontFamily": "Police de l'éditeur",
+  "fontLigatures": "Ligatures de police",
+  "fontLigaturesDescription": "Activer les ligatures de police dans le code",
+  "selectFontFamily": "Sélectionner la police",
+  "selectLanguage": "Sélectionner la langue",
+  "format": "Formater",
+  "liveShare": "Partage en Direct",
+  "hostSession": "Créer une Session",
+  "joinSession": "Rejoindre la Session",
+  "stopSession": "Arrêter la Session",
+  "disconnectSession": "Se déconnecter",
+  "sessionActive": "Session Active",
+  "hostingAt": "Hébergé sur :",
+  "connectedTo": "Connecté à :",
+  "userName": "Votre Nom",
+  "usersList": "Participants",
+  "messagePlaceholder": "Tapez un message...",
+  "connectError": "Erreur de connexion",
+  "invalidAddress": "Adresse invalide",
+  "joinLink": "Adresse IP de la session",
+  "localIps": "IPs Locales :",
+  "wasmPlugins": "Extensions WASM",
+  "installPlugin": "Installer l'extension (.wasm)",
+  "noPluginsInstalled": "Aucun plugin WASM installé",
+  "pluginEnabled": "Extension activée",
+  "pluginDisabled": "Extension désactivée",
+  "runWasmAction": "Exécuter l'action WASM",
+  "noActiveSelection": "Aucun texte sélectionné. Appliquer à tout le fichier ?",
+  "applyToSelection": "Appliquer à la sélection",
+  "applyToDocument": "Appliquer au document",
+  "logs": "Journaux",
+  "clearLogs": "Effacer les logs",
+  "deletePlugin": "Supprimer le plugin",
+  "resetToDefaults": "Réinitialiser",
+  "welcomeTitle": "Bienvenue !",
+  "welcomeSubtitle": "Choisissez un projet sur lequel travailler ou créez-en un nouveau",
+  "lastActiveProject": "Dernier projet actif",
+  "runTooltip": "Lancer",
+  "actionsTooltip": "Actions",
+  "packagesTooltip": "Packages",
+  "extensionsAndTools": "Extensions et Outils",
+  "searchExtensionsHint": "Rechercher des extensions...",
+  "searchPubdevHint": "Rechercher des bibliothèques sur pub.dev (ex. dio)...",
+  "tabAll": "Tout",
+  "tabInstalled": "Installé",
+  "tabLanguagesAndAi": "Langues et IA",
+  "tabTools": "Outils",
+  "tabBuild": "Compiler",
+  "tabSdkPlatforms": "Plateformes SDK",
+  "tabPubLibraries": "Bibliothèques Pub",
+  "readyToBuildApk": "Prêt à compiler l'APK?",
+  "installAndroidSdkJava": "Installer Android SDK et Java 17",
+  "sdkSetupDescription": "Cela configurera le SDK, les compilateurs, zipalign, apksigner, optimisera les paramètres réseau de Gradle et préparera votre environnement pour la compilation de projets.",
+  "initializingDevEnvironment": "Initialisation de l'environnement de développement...",
+  "viewAction": "Voir",
+  "startSdkSetup": "Démarrer la configuration de l'environnement",
+  "buildIssues": "Problèmes de compilation?",
+  "restoreAndroidGradleEnv": "Restaurer l'environnement Android et Gradle",
+  "wrenchFixDescription": "Corrige automatiquement les erreurs du démon AAPT2, définit les autorisations de projet correctes, restaure le binaire du compilateur de ressources et configure les threads Gradle.",
+  "runningWrenchFix": "Exécution de la correction de l'environnement de compilation...",
+  "startWrenchFix": "Exécuter la correction (Wrench Fix)",
+  "statusInstalledCaps": "INSTALLÉ",
+  "reinstallOrUpdateTooltip": "Réinstaller / Mettre à jour",
+  "updatingPackage": "Mise à jour de {name}...",
+  "@updatingPackage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "installingPackage": "Installation de {name}...",
+  "@installingPackage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "installAction": "Installer",
+  "searchPubdevTitle": "Rechercher des bibliothèques Flutter",
+  "searchPubdevDescription": "Entrez le nom de la bibliothèque (ex. dio, bloc, riverpod) dans la recherche ci-dessus et appuyez sur Entrée",
+  "loadError": "Erreur de chargement: {error}",
+  "@loadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "addAction": "Ajouter",
+  "openProjectToInstallLibraries": "Veuillez d'abord ouvrir un projet pour ajouter des bibliothèques.",
+  "installingLibrary": "Installation de la bibliothèque {name}...",
+  "@installingLibrary": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "importError": "Erreur d'importation: {error}",
+  "@importError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "filesImportedSuccessfully": "Fichiers importés avec succès",
+  "dragFilesHereToImport": "Faites glisser des fichiers ici pour les importer",
+  "selectedCount": "Sélectionné: {count}",
+  "@selectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "selectAllTooltip": "Tout sélectionner",
+  "copyTooltip": "Copier",
+  "copiedCount": "Objets copiés: {count}",
+  "@copiedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cutTooltip": "Couper",
+  "cutCount": "Objets coupés: {count}",
+  "@cutCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "zipTooltip": "Compresser en ZIP",
+  "deleteTooltip": "Supprimer",
+  "foldersCount": "Dossiers: {count}",
+  "@foldersCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "askAiAction": "Demander à l'IA",
+  "explainAiAction": "IA: Expliquer",
+  "documentAiAction": "IA: Documenter",
+  "testAiAction": "IA: Générer des tests",
+  "optimizeAiAction": "IA: Optimiser",
+  "pasteCount": "Coller ({count})",
+  "@pasteCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "archiveNameHint": "Nom de l'archive",
+  "compressAction": "Compresser",
+  "archiveCreatedSuccessfully": "Archive créée avec succès !",
+  "compressionError": "Erreur de compression: {error}",
+  "@compressionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "archiveExtractedSuccessfully": "Archive extraite avec succès !",
+  "extractionError": "Erreur d'extraction: {error}",
+  "@extractionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteSelectedTitle": "Supprimer la sélection ?",
+  "deleteSelectedConfirmation": "Êtes-vous sûr de vouloir supprimer {count} éléments ?",
+  "@deleteSelectedConfirmation": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "selectedElementsDeleted": "Éléments sélectionnés supprimés !",
+  "deleteError": "Erreur de suppression: {error}",
+  "@deleteError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "filesPastedSuccessfully": "Fichiers collés avec succès !",
+  "pasteError": "Erreur de collage: {error}",
+  "@pasteError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryNotFound": "Dépôt non trouvé",
+  "initGitRepoDescription": "Initialisez un dépôt Git local pour suivre les modifications.",
+  "initGitAction": "Initialiser Git",
+  "gitConflicted": "CONFLITS",
+  "gitStaged": "INDEXÉ",
+  "gitModified": "MODIFIÉ",
+  "gitUntracked": "NON SUIVI",
+  "commitMessageHint": "Message de commit...",
+  "resetChangesTitle": "Réinitialiser les modifications ?",
+  "resetChangesConfirmation": "Êtes-vous sûr de vouloir réinitialiser définitivement toutes les modifications non validées dans ce fichier ?",
+  "resetAction": "Réinitialiser",
+  "changesReset": "Modifications réinitialisées",
+  "resetError": "Erreur de réinitialisation: {error}",
+  "@resetError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "normalView": "Vue normale",
+  "splitView": "Vue fractionnée (Side-by-Side)",
+  "stagedMessage": "Fichier indexé",
+  "unstagedMessage": "Fichier désindexé",
+  "stageError": "Erreur d'indexation: {error}",
+  "@stageError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToLoadChanges": "Échec du chargement des modifications",
+  "noChanges": "Aucune modification",
+  "fileIdenticalToHead": "Ce fichier est identique à HEAD",
+  "runTerminalTooltip": "Lancer",
+  "restartTerminalTooltip": "Redémarrer",
+  "consoleSubTab": "Console",
+  "signApkSubTab": "Signer l'APK",
+  "copiedToClipboard": "Copié dans le presse-papiers",
+  "back": "Retour",
+  "tryChangingSearchQuery": "Essayez de modifier la requête de recherche",
+  "incomingBranch": "Branche entrante",
+  "resolveConflictsBeforeSaving": "Veuillez résoudre tous les conflits avant d'enregistrer !",
+  "fileSavedAndStaged": "Fichier enregistré avec succès et indexé dans Git",
+  "saveError": "Erreur d'enregistrement : {error}",
+  "@saveError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "acceptMerge": "Accepter la fusion",
+  "errorLoadingConflictFile": "Erreur lors du chargement du fichier de conflit",
+  "conflictsNotFound": "Aucun conflit trouvé",
+  "noConflictMarkersFound": "Aucun marqueur de conflit Git standard trouvé dans ce fichier.",
+  "backToGit": "Retour à Git",
+  "conflictBlock": "Bloc de conflit",
+  "currentChangesOurs": "Modifications actuelles (Ours / HEAD)",
+  "incomingChanges": "Modifications entrantes ({branch})",
+  "@incomingChanges": {
+    "placeholders": {
+      "branch": {
+        "type": "String"
+      }
+    }
+  },
+  "useThisVersion": "Utiliser cette version",
+  "mergeResultEditable": "Résultat de la fusion (Modifiable)",
+  "chooseVersionOrWriteHint": "Choisissez l'une des versions ci-dessus ou écrivez votre propre résolution...",
+  "markAsResolvedHint": "* Pour marquer ce bloc comme résolu, saisissez ou choisissez du texte.",
+  "emptyLabel": "(Vide)",
+  "stageAction": "Index",
+  "unstageAction": "Désindexer",
+  "cursorColor": "COULEUR DU CURSEUR",
+  "or": "OU",
+  "ipCopiedToClipboard": "IP copiée dans le presse-papiers",
+  "editingFile": "Modification : {file}",
+  "@editingFile": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "viewingProject": "Visualisation du projet",
+  "noProblemsFound": "Aucun problème trouvé dans l'espace de travail",
+  "problemsList": "Liste des problèmes",
+  "sendToAi": "Envoyer à l'IA",
+  "helpMeFixErrors": "Veuillez m'aider à corriger les erreurs de compilation suivantes dans mon projet :",
+  "lineColumn": "Ligne {line}, Colonne {col}",
+  "@lineColumn": {
+    "placeholders": {
+      "line": {
+        "type": "int"
+      },
+      "col": {
+        "type": "int"
+      }
+    }
+  },
+  "decreaseFontSize": "Diminuer la taille de la police",
+  "increaseFontSize": "Augmenter la taille de la police",
+  "undo": "Annuler",
+  "redo": "Rétablir",
+  "moveLeft": "Déplacer à gauche",
+  "moveUp": "Déplacer vers le haut",
+  "moveDown": "Déplacer vers le bas",
+  "moveRight": "Déplacer à droite",
+  "edit": "Modifier",
+  "packagesAndEnv": "Packages & Env",
+  "packagesInstalledCount": "Installés : {count}/{total}",
+  "@packagesInstalledCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "flutterProject": "Projet Flutter",
+  "pythonProject": "Projet Python",
+  "nodejsProject": "Projet Node.js",
+  "dartProject": "Projet Dart",
+  "webProject": "Projet Web",
+  "androidProject": "Projet Android",
+  "rustProject": "Projet Rust",
+  "genericProject": "Projet",
+  "runPC": "Exécuter (PC)",
+  "runMob": "Exécuter (Mobile)",
+  "startServer": "Démarrer le serveur",
+  "buildAPK": "Créer l'APK",
+  "startTheProject": "Démarrer le projet",
+  "outputCopied": "Sortie copiée",
+  "console": "Console",
+  "signApk": "Signer l'APK",
+  "buildPC": "Créer (PC)",
+  "buildLogs": "Registres de création",
+  "resetPlugins": "Réinitialiser les plugins",
+  "resetPluginsConfirmation": "Cela supprimera tous les plugins personnalisés installés et restaurera les plugins par défaut. Continuer ?",
+  "resetPluginsTitle": "Réinitialiser les plugins ?",
+  "installWasm": "Installer .wasm",
+  "availableActions": "Actions disponibles :",
+  "logsTerminal": "Terminal de logs",
+  "noLogsCaptured": "Aucun log capturé pour le moment",
+  "installWasmPluginTitle": "Installer le plugin WASM",
+  "selectWasmFile": "Sélectionner le fichier .wasm",
+  "pluginName": "Nom du plugin",
+  "nameRequired": "Le nom est obligatoire",
+  "pluginDescription": "Description",
+  "descriptionRequired": "La description est obligatoire",
+  "exposedActions": "Actions exposées",
+  "add": "Ajouter",
+  "pickWasmFileFirst": "Veuillez d'abord choisir un fichier .wasm",
+  "pluginInstalledSuccessfully": "Plugin installé avec succès",
+  "failedToInstall": "Échec de l'installation : {error}",
+  "@failedToInstall": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "mcpServersTitle": "AI Modules: MCP Servers",
+  "activeServers": "Active Servers ({count})",
+  "@activeServers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "repository": "Repository",
+  "noMcpServers": "No MCP servers added",
+  "goToRepository": "Go to Repository",
+  "addManually": "Add Manually",
+  "addServerManually": "Add Server Manually",
+  "installed": "INSTALLED",
+  "install": "Install",
+  "packageDetail": "Package: {detail}",
+  "@packageDetail": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "authParam": "Auth parameter: {key}",
+  "@authParam": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "enterValueFor": "Enter value for {key}",
+  "@enterValueFor": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "enterLabel": "Enter {label}",
+  "@enterLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "installPreset": "Install: {name}",
+  "@installPreset": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "serverName": "Server Name",
+  "exampleLocalSearch": "For example: local-search",
+  "connectionType": "Connection Type",
+  "stdioLocal": "Stdio (Local process)",
+  "sseHttp": "SSE (HTTP stream)",
+  "startCommand": "Start Command",
+  "exampleStartCommand": "For example: node or npx or python3",
+  "argsSpace": "Arguments (separated by space)",
+  "searchFilesHint": "Search files... (type \"#\" for symbols)",
+  "searchSymbolsHint": "Search symbols in code...",
+  "modeFiles": "MODE: FILES",
+  "modeSymbols": "MODE: SYMBOLS",
+  "resultsCount": "Results: {count}",
+  "@resultsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noResults": "No results found",
+  "confirmDeleteTitle": "Confirmer la suppression",
+  "confirmDeleteMultiple": "Are you sure you want to delete {count} items?",
+  "@confirmDeleteMultiple": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "archiveExtracted": "Archive successfully extracted!",
+  "archiveCreated": "Archive successfully created!",
+  "compressToZip": "Compress to ZIP",
+  "folderLabel": "Folder: {name}",
+  "@folderLabel": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "fileLabel": "File: {name}",
+  "@fileLabel": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "whatShouldAiDoFolder": "What should AI do with this folder?",
+  "whatShouldAiDoFile": "What should AI do with this file?",
+  "askAi": "Ask AI",
+  "askAiDesc": "Interactive chat with AI assistant",
+  "explainStructure": "AI: Explain Structure",
+  "explainStructureDesc": "Detailed summary of code or folders",
+  "addDoc": "AI: Add Documentation",
+  "addDocDesc": "Generate docstrings and comments",
+  "generateTests": "AI: Generate Tests",
+  "generateTestsDesc": "Write unit tests for the code",
+  "optimizeCode": "AI: Optimize",
+  "optimizeCodeDesc": "Suggest performance improvements",
+  "newFileDesc": "Create a file in this folder",
+  "newFolderDesc": "Create a subfolder",
+  "removeFromBookmarks": "Remove from Bookmarks",
+  "removeFromBookmarksDesc": "Remove file from quick access",
+  "addToBookmarks": "Add to Bookmarks",
+  "addToBookmarksDesc": "Pin file for quick access",
+  "copyDesc": "Add to clipboard",
+  "cutDesc": "Move files",
+  "pasteDesc": "Paste copied items",
+  "renameDesc": "Change item name",
+  "extractZip": "Extract ZIP",
+  "extractZipDesc": "Extract files from archive",
+  "compressZip": "Compress to ZIP",
+  "compressZipDesc": "Create ZIP archive",
+  "compressSelectedZip": "Compress selected to ZIP",
+  "compressSelectedZipDesc": "Create archive from selected items",
+  "deleteDesc": "Permanent delete",
+  "empty": "empty",
+  "nameFolderHint": "folder_name",
+  "nameFileHint": "file_name.txt",
+  "itemMoved": "Item successfully moved",
+  "moveError": "Move error: {error}",
+  "@moveError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "image": "IMAGE",
+  "document": "DOCUMENT",
+  "failedToLoadImage": "Failed to load image",
+  "failedToReadFile": "Failed to read file: {error}",
+  "@failedToReadFile": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "aiSettings": "AI Settings",
+  "provider": "Provider",
+  "model": "Model",
+  "apiKey": "API Key",
+  "customBaseUrl": "Custom Base URL",
+  "defaultHint": "Default: {url}",
+  "@defaultHint": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "chatWithAi": "CHAT WITH AI",
+  "chatHistory": "Chat History",
+  "newChat": "New Chat",
+  "internetAccess": "Internet Access",
+  "mcpServers": "MCP Servers",
+  "stop": "Stop",
+  "manualMode": "Manual Mode",
+  "safeAutopilot": "Safe Autopilot",
+  "fullAutonomy": "Full Autonomy",
+  "agentsNotInstalled": "Agents not installed",
+  "installGeminiCliInSettings": "Install gemini-cli in settings",
+  "stopAgent": "STOP AGENT",
+  "withChanges": "with changes",
+  "rejectAll": "Reject all",
+  "acceptAll": "Accept all",
+  "attachOpenFile": "Attach open file",
+  "noHistoryFound": "No history found",
+  "untitled": "Untitled",
+  "messagesCount": "{count} messages",
+  "@messagesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "systemEnv": "System Environment",
+  "fixEnvironmentArm64": "Fix Environment (ARM64)",
+  "environment": "Environment",
+  "collapseAll": "Collapse All",
+  "elementMovedToRoot": "Element moved to root",
+  "bookmarks": "Bookmarks",
+  "noActiveWasmPlugins": "No active WASM plugins",
+  "selectPluginAction": "Select Plugin Action",
+  "noSelection": "No selection",
+  "applyPluginToFile": "Apply plugin action to the entire file?",
+  "apply": "Apply",
+  "pluginExecutedSuccess": "Plugin executed successfully",
+  "executionError": "Execution error: {error}",
+  "@executionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quickSearch": "Quick Search (Ctrl+P)",
+  "saveTooltip": "Save",
+  "runWasmPlugin": "Run WASM Plugin",
+  "aiChat": "AI Chat",
+  "home": "Home",
+  "pendingDiff": "Pending Diff",
+  "keep": "Keep",
+  "reject": "Reject",
+  "keepAll": "Keep all",
+  "ranAction": "Ran: {content}",
+  "@ranAction": {
+    "placeholders": {
+      "content": {
+        "type": "String"
+      }
+    }
+  },
+  "created": "Created",
+  "deleted": "Deleted",
+  "edited": "Edited",
+  "taskExecution": "Task Execution",
+  "stepNumber": "Step {step}/{total}",
+  "@stepNumber": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "filesChangedCount": "Files changed: {count} (+{additions} -{deletions})",
+  "@filesChangedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "additions": {
+        "type": "int"
+      },
+      "deletions": {
+        "type": "int"
+      }
+    }
+  },
+  "commandsExecutedCount": "Executed {count} commands",
+  "@commandsExecutedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "changesAccepted": "Changes accepted and stashed",
+  "undoneChanges": "Undid {count} file changes",
+  "@undoneChanges": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "discardedFileChanges": "Discarded changes in {file}",
+  "@discardedFileChanges": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "thinking": "Thinking...",
+  "planner": "PLANNER",
+  "coder": "CODER",
+  "validator": "VALIDATOR",
+  "aiAgentRole": "AI-AGENT",
+  "resubmit": "Resubmit",
+  "rollbackHistoryToStep": "Rollback history and code to this step",
+  "confirmRollback": "Confirm Rollback",
+  "rollbackConfirmationText": "All code changes made after this message will be reverted, and subsequent messages deleted. Continue?",
+  "yesRollback": "Yes, rollback",
+  "changesApplied": "Changes applied",
+  "codeCopied": "Code copied to clipboard",
+  "outOfScope": "Out of scope!",
+  "low": "Low",
+  "medium": "Medium",
+  "high": "High",
+  "applied": "Applied",
+  "resolveConflictTooltip": "Resolve conflict",
+  "panel1": "PANEL 1",
+  "panel2": "PANEL 2",
+  "localWebServer": "Local Web Server",
+  "webServerDesc": "Start web server to preview your project's build results right inside the IDE.",
+  "startWebServer": "Start Web Server",
+  "stopWebServer": "Stop Web Server",
+  "copyAll": "Copy All",
+  "clearTerminal": "Clear Terminal",
+  "openInExternalBrowser": "Open in external browser",
+  "search": "Rechercher",
+  "structure": "Structure",
+  "disk": "Disque",
+  "plugins": "Plugins",
+  "added": "ajouté",
+  "removed": "supprimé",
+  "modified": "modifié",
+  "selectedObjectsCount": "Objets sélectionnés: {count}",
+  "@selectedObjectsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "explainFolderPreset": "Expliquer le but et la structure de ce dossier.",
+  "explainFilePreset": "Expliquer en détail le but et la logique de fonctionnement de ce fichier.",
+  "addDocFolderPreset": "Ajouter de la documentation, des docstrings et des commentaires détaillés au code dans tous les fichiers de ce dossier.",
+  "addDocFilePreset": "Ajouter une documentation claire, des docstrings et des commentaires détaillés au code dans ce fichier.",
+  "generateTestsFolderPreset": "Écrire des tests unitaires pour les fichiers de ce dossier.",
+  "generateTestsFilePreset": "Écrire des tests unitaires complets pour le code de ce fichier.",
+  "optimizeFolderPreset": "Analyser le code de ce dossier et suggérer des optimisations de performances et de lisibilité.",
+  "optimizeFilePreset": "Analyser le code de ce fichier et suggérer des options pour optimiser les performances, la lisibilité et l'architecture.",
+  "deleteSelected": "Supprimer la sélection",
+  "manual": "Manuel",
+  "autoSafe": "Auto:Sécurisé",
+  "autoFull": "Auto:Complet",
+  "filesCount": "{count} {count, plural, =1{fichier} other{fichiers}}",
+  "@filesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "localAiEngineTitle": "MOTEUR D'IA LOCALE",
+  "ollamaRunningLocally": "Ollama fonctionne localement",
+  "ollamaRunningLocallyDesc": "Assurez-vous qu'Ollama fonctionne sur votre système. Vous pouvez le démarrer avec \"ollama serve\" et télécharger les modèles requis avec \"ollama pull <modèle>\".",
+  "lmStudioRunningLocally": "LM Studio fonctionne localement",
+  "lmStudioRunningLocallyDesc": "Assurez-vous que le serveur LM Studio fonctionne. Vous pouvez activer le Serveur Local dans l'application LM Studio et charger le modèle requis.",
+  "ollamaNotDetected": "Ollama non détecté",
+  "ollamaNotDetectedDesc": "Installez Ollama sur votre appareil et assurez-vous qu'il fonctionne. L'URL peut être modifiée ci-dessus.",
+  "checkConnection": "Vérifier la connexion",
+  "availableOllamaModels": "MODÈLES OLLAMA DISPONIBLES",
+  "llamaServerInstallRequired": "Installation de llama-server requise",
+  "llamaServerInstallRequiredDesc": "Le moteur llama-server est requis pour exécuter des modèles d'IA locaux. Cliquez sur le bouton ci-dessous pour l'installer automatiquement.",
+  "installing": "Installation...",
+  "installLlamaServerRuntime": "Installer Llama Server Runtime",
+  "ollamaModelsTitle": "MODÈLES OLLAMA",
+  "localAiModelsTitle": "MODÈLES D'IA LOCAUX",
+  "serverStatusAndControl": "STATUT ET CONTRÔLE DU SERVEUR",
+  "downloadOllamaModelPrompt": "Téléchargez au moins un modèle Ollama pour commencer.",
+  "downloadModelToStartServerPrompt": "Téléchargez au moins un modèle ci-dessus pour démarrer le serveur local.",
+  "localLlamaServerLabel": "Serveur local llama-server",
+  "connected": "Connecté",
+  "runningPort8080": "En cours d'exécution (port 8080)",
+  "starting": "Démarrage...",
+  "stopped": "Arrêté",
+  "start": "Démarrer",
+  "activeCaps": "ACTIF",
+  "gbFormat": "{size} Go",
+  "@gbFormat": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "ramGbFormat": "~{size} Go de RAM",
+  "@ramGbFormat": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "select": "Sélectionner",
+  "download": "Télécharger",
+  "refreshPreview": "Actualiser l'aperçu",
+  "inFolder": "dans {folder}",
+  "@inFolder": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "llamaServerBuiltIn": "llama-server (intégré)",
+  "localAiDisplayName": "IA locale",
+  "notRequired": "non requis",
+  "mcpGithubDesc": "Intégration avec les dépôts, tickets (issues) et PR sur GitHub.",
+  "mcpGoogleSearchDesc": "Permet à l'agent IA d'effectuer des recherches Google en direct.",
+  "mcpFetchDesc": "Télécharge des pages Web et les convertit automatiquement en Markdown.",
+  "mcpPostgresDesc": "Connecter, lire la structure des tables et exécuter des requêtes SQL sur PostgreSQL.",
+  "mcpPostgresArg": "Chaîne de connexion (postgresql://...)",
+  "mcpSqliteDesc": "Connecter et inspecter les bases de données SQLite dans votre projet.",
+  "mcpSqliteArg": "Chemin vers le fichier DB SQLite (ex: db.sqlite)",
+  "mcpMemoryDesc": "Stockage sémantique de mémoire à long terme pour votre agent IA.",
+  "mcpBraveSearchDesc": "Permet à l'agent IA d'effectuer des recherches Web à l'aide de l'API Brave.",
+  "mcpPuppeteerDesc": "Automatisation du navigateur, génération de captures d'écran, clics et scraping Web.",
+  "mcpFirecrawlDesc": "Convertit n'importe quel site Web en Markdown propre ou en JSON structuré.",
+  "mcpNotionDesc": "Lire et modifier des pages, bases de données et commentaires dans Notion.",
+  "mcpSlackDesc": "Permet de lire des canaux, de discuter et d'envoyer des notifications dans Slack.",
+  "mcpGitDesc": "Afficher les commits, comparer les versions, rechercher des commits et inspecter les fichiers localement via Git.",
+  "mcpGitlabDesc": "Gérer les projets GitLab, les tickets, les PR et les pipelines de CI/CD.",
+  "mcpSentryDesc": "Récupérer les journaux d'erreurs et inspecter les plantages de votre application sur Sentry.",
+  "mcpAirtableDesc": "Lire, créer et mettre à jour des enregistrements dans les bases de datos et tables Airtable.",
+  "mcpSequentialThinkingDesc": "Organiser les réflexions de l'agent IA pour une résolution structurée des problèmes.",
+  "phantomProcessesTitle": "Processus fantômes (Android 12/13+)",
+  "phantomProcessesVersion": "Configuration ADB requise pour une compilation stable",
+  "phantomProcessesError": "Dans Android 12+, le tueur de processus système (Phantom Process Killer) interrompt les builds (Gradle/Java/Node/Dart) si la limite dépasse 32 processus actifs.\n\nPour le désactiver, exécutez via ADB sur votre PC :\n\nadb shell \"/system/bin/device_config put activity_manager max_phantom_processes 2147483647\"\n\nadb shell \"/system/bin/settings put global settings_enable_monitor_phantom_procs false\"",
+  "androidJarCorruptError": "android.jar est corrompu ({api}). Cliquez sur \"Corriger l'environnement\" pour réinstaller.",
+  "@androidJarCorruptError": {
+    "placeholders": {
+      "api": {
+        "type": "String"
+      }
+    }
+  },
+  "androidSdkPlatformsHealthy": "android-35 / android-36 — sains",
+  "checkFailed": "Échec de la vérification : {error}",
+  "@checkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "analyzingTaskAndPlanning": "Analyse de la tâche et planification...",
+  "agentStepLimitExceeded": "🤖 Limite d'étapes de l'agent ({limit}) dépassée. Autopilote arrêté.",
+  "generatingCodeChanges": "Génération des modifications de code...",
+  "executionPlanConstructed": "📝 Plan d'exécution construit. Transition vers le rôle de Coder...",
+  "verifyingImplementation": "Vérification de la correction de l'implémentation...",
+  "blockedUnsafeActions": "❌ Actions non sécurisées bloquées hors de la portée de l'espace de travail:\n{blockedText}",
+  "awaitingApprovalHighRisk": "⚠️ En attente d'approbation: Actions à haut risque détectées ou l'autopilote est restreint. Veuillez les approuver dans le panneau IA.",
+  "autopilotStepSummary": "🤖 Autopilote (étape {step}): Auto-approbation des actions:\n{actionsListText}\n\nRésultats:\n{results}",
+  "runningStaticAnalysis": "Exécution de l'analyse statique du projet (dart analyze)...",
+  "agentFailedToFixErrors": "⚠️ L'agent n'a pas réussi à corriger les erreurs après {maxAttempts} tentatives.\n\n**Erreurs restantes:**\n{errorReport}\n\nVeuillez décrire le problème ou le corriger manuellement.",
+  "fixingCompilationErrors": "Correction des erreurs de compilation...",
+  "readingFile": "Lecture du fichier {path}...",
+  "savingFile": "Enregistrement du fichier {path}...",
+  "deletingFile": "Suppression du fichier {path}...",
+  "runningCommandStatus": "Exécution de la commande \"{command}\"...",
+  "searchingCode": "Recherche dans le code: \"{query}\"...",
+  "listingDirectory": "Affichage du répertoire {path}...",
+  "findingSymbols": "Recherche de symboles: \"{query}\"...",
+  "searchingWeb": "Recherche sur le web: \"{query}\"...",
+  "fetchingWebPage": "Téléchargement de la page web: {path}...",
+  "executingAction": "Exécution de l'action...",
+  "runningCommandLabel": "🤖 Exécution de la commande: {command}...",
+  "applyingChangeLabel": "🤖 Application du changement: {path}...",
+  "commandSentToTerminalLabel": "🤖 Commande \"{command}\" envoyée au terminal.",
+  "runningCommandResultLabel": "Commande \"{command}\" exécutée. Résultat:\n{result}",
+  "fileNotFound": "Fichier non trouvé: {path}",
+  "fileContentsHeader": "Contenu du fichier `{path}` ({lineCount} lignes):\n\n```\n{truncated}\n```",
+  "fileTruncatedSuffix": "... [tronqué à 8000 caractères de {lineCount} lignes]",
+  "safetyGuardFileOutsideWorkspace": "Erreur: Tentative de modification de fichier en dehors de la portée du projet.",
+  "commandRefPathOutsideWorkspace": "Erreur de sécurité: La commande fait référence à un chemin en dehors de la portée du projet.",
+  "commandBlockedUnsafe": "Erreur de sécurité: La commande contient une instruction bloquée \"{blocked}\".",
+  "aiSearchNoMatches": "Aucune correspondance trouvée pour \"{query}\".",
+  "aiSearchMatchesFound": "Trouvé {matchCount} correspondances pour \"{query}\":\n\n{results}",
+  "searchSymbolsNoMatches": "Aucun symbole trouvé correspondant à \"{query}\".",
+  "searchSymbolsMatchesFound": "Trouvé {count} symboles correspondant à \"{query}\":\n\n{results}",
+  "searchSymbolsItem": "- [{type}] {name} (fichier: {path}, ligne: {line})",
+  "directoryNotFound": "Répertoire non trouvé: {path}",
+  "directoryEmpty": "Le répertoire est vide.",
+  "directoryContentsHeader": "Contenu du répertoire:\n\n{items}",
+  "mcpMissingParams": "Erreur: Le nom du serveur MCP ou de l'outil n'est pas spécifié.",
+  "unknownAction": "Type d'action inconnu: {type}",
+  "failedToApplyActionWithError": "Échec de l'application de l'action: {error}",
+  "searchQueryEmpty": "Erreur: La requête de recherche est vide.",
+  "workspaceNotFound": "Erreur: Espace de travail introuvable.",
+  "webPreviewStopped": "Aperçu Web arrêté",
+  "webPreviewStartInstructions": "Démarrez le serveur et cliquez sur le bouton de lecture.",
+  "modelDescQwen1_5b": "Modèle optimisé pour le codage. Très rapide, adapté à tous les appareils.",
+  "modelDescQwen7b": "Modèle puissant pour les tâches de codage complexes. Nécessite un appareil performant.",
+  "modelDescLlama1b": "Modèle de langage léger de Meta. Vitesse d'exécution élevée.",
+  "modelDescLlama3b": "Modèle équilibré de Meta. Bonne compréhension du contexte.",
+  "modelDescOllamaQwen1_5b": "Modèle de codage léger et rapide d'Alibaba.",
+  "modelDescOllamaQwen7b": "Modèle puissant pour un large éventail de tâches de programmation.",
+  "modelDescOllamaLlama1b": "Modèle compact de Meta, idéal pour les tâches légères.",
+  "modelDescOllamaLlama3b": "Modèle équilibré de Meta pour les tâches générales et les dialogues.",
+  "modelDescOllamaDeepseek1_3b": "Modèle de codage spécialisé de DeepSeek.",
+  "modelDescOllamaDeepseek6_7b": "Modèle de codage hautement efficace de DeepSeek.",
+  "modelDescOllamaMistral7b": "Modèle polyvalent d'usage général avec une bonne compréhension du code.",
+  "modelDescOllamaGemma2b": "Modèle compact efficace et précis de Google.",
+  "modelDescOllamaGemma9b": "Modèle de langage puissant d'usage général de Google.",
+  "collabSessionCreated": "Session créée sur le port {port}.",
+  "@collabSessionCreated": {
+    "placeholders": {
+      "port": {
+        "type": "int"
+      }
+    }
+  },
+  "collabSessionCreateError": "Erreur lors de la création de la session : {error}",
+  "@collabSessionCreateError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "collabUserDisconnected": "L'utilisateur {name} s'est déconnecté.",
+  "@collabUserDisconnected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "collabConnectError": "Erreur de connexion à {url} : {error}",
+  "@collabConnectError": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      },
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "collabConnectionLost": "Connexion à la session perdue.",
+  "collabUserJoined": "L'utilisateur {name} a rejoint la session.",
+  "@collabUserJoined": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "collabJoinedAsGuest": "Vous avez rejoint la session en tant qu'invité.",
+  "collabUserLeft": "L'utilisateur {name} a quitté la session.",
+  "@collabUserLeft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "webPreviewNotSupported": "L'aperçu web n'est pas pris en charge sur cette plateforme",
+  "webPreviewNotSupportedDesc": "L'affichage WebView intégré n'est pas pris en charge sur cette plateforme. Utilisez le bouton en haut à droite pour l'ouvrir dans un navigateur externe.",
+  "aboutAppSubtitle": "Quantum IDE v1.0.0",
+  "aboutDialogContent": "IDE mobile propulsée par l'IA, construite avec Flutter.\n© 2026 Quantum IDE",
+  "activateProvider": "Activer le fournisseur",
+  "activeProvider": "Fournisseur actif",
+  "aiAskDialogTitle": "Requête de l'agent IA",
+  "aiAskFile": "Fichier : {name}",
+  "aiAskFileHint": "Que doit-on faire ?",
+  "aiAskFolder": "Dossier : {name}",
+  "aiAskFolderHint": "Décrivez la tâche",
+  "aiAutoCompletion": "Saisie automatique par IA",
+  "aiProvidersInfo": "Ajoutez les clés API pour différents fournisseurs d'IA.",
+  "aiProvidersSubtitle": "Gemini, OpenAI, Ollama, etc.",
+  "all": "Tous",
+  "androidCompileSdkVersion": "VERSION ANDROID compileSdk",
+  "apiKeyLabel": "Clé API",
+  "apkBuildFixed": "Fichiers de compilation Android corrigés",
+  "apkPathHint": "Chemin complet vers le fichier APK",
+  "apkSigner": "Signeur d'APK",
+  "appLogs": "Journaux de l'application",
+  "applyingChange": "Application de la modification : {path}...",
+  "areYouSureDelete": "Êtes-vous sûr de vouloir supprimer {name} ?",
+  "askAboutCode": "Poser une question sur le code",
+  "askAiHint": "Demander à {provider}...",
+  "attachImage": "Joindre une image",
+  "autoSaveDescription": "Enregistrer les modifications après 2s",
+  "available": "Disponible",
+  "availableCaps": "DISPONIBLE",
+  "breakpoints": "Points d'arrêt",
+  "buildApk": "Compiler l'APK",
+  "buildApkDescription": "flutter build apk --debug",
+  "callStack": "Pile d'appels",
+  "changesInFile": "Modifications dans {name}",
+  "clean": "Nettoyer",
+  "clear": "Effacer",
+  "clearHistory": "Effacer l'historique",
+  "clearLog": "Effacer le journal",
+  "closeProject": "Fermer le projet",
+  "column": "Colonne",
+  "command": "COMMANDE",
+  "commandExecutedResult": "Commande exécutée.",
+  "commandSentToTerminal": "Commande envoyée au terminal.",
+  "continue_": "Continuer",
+  "copied": "Copié : {value}",
+  "copyUrl": "Copier l'URL",
+  "createKeystore": "Créer un Keystore",
+  "customColor": "Couleur personnalisée",
+  "cut": "Couper",
+  "debugger": "Débogueur",
+  "defaultAccent": "Par défaut",
+  "defaultSdkVersion": "Par défaut : 35",
+  "deleteFromDisk": "Du disque",
+  "deleteFromListOnly": "De la liste uniquement",
+  "documentation": "Documentation",
+  "downloaded": "Téléchargés",
+  "fastCommands": "COMMANDES RAPIDES",
+  "fixAndroidBuild": "Corriger la compilation Android",
+  "geminiCodeGeneration": "Génération de code par Gemini",
+  "goToDefinition": "Aller à la définition",
+  "hosts": "Hôtes",
+  "hotReload": "Rechargement à chaud",
+  "imageLoadError": "Erreur lors du chargement de l'image",
+  "info": "Info",
+  "launchConfiguration": "Configuration de lancement",
+  "line": "Ligne",
+  "lineCol": "Lig {line}, Col {col}",
+  "load": "Charger",
+  "localModels": "Modèles locaux",
+  "market": "Marché",
+  "noErrorsFound": "Aucune erreur trouvée",
+  "noFilesFound": "Aucun fichier trouvé",
+  "noModelsFound": "Aucun modèle trouvé",
+  "noOutput": "Pas de sortie",
+  "noStackFrames": "Pas de pile d'appels",
+  "noVariables": "Pas de variables",
+  "nothingFound": "Rien trouvé",
+  "ok": "OK",
+  "open": "Ouvrir",
+  "output": "Sortie",
+  "paste": "Coller",
+  "pause": "Pause",
+  "programToDebug": "Programme à déboguer",
+  "projectActions": "Actions du projet",
+  "projectIcon": "Icône du projet",
+  "projectsHeader": "Projets ({count})",
+  "restart": "Redémarrer",
+  "runProject": "Exécuter le projet",
+  "running": "En cours...",
+  "searchProjects": "Rechercher des projets...",
+  "selectAll": "Tout sélectionner",
+  "selectPalette": "Sélectionner la palette",
+  "serverAddress": "Adresse du serveur",
+  "setupSdk": "Configurer le SDK",
+  "showCodeHints": "Afficher les indices de code",
+  "showHiddenFiles": "Afficher les fichiers cachés",
+  "showLineNumbers": "Afficher les numéros de ligne",
+  "showMinimap": "Afficher la minicarte de l'éditeur",
+  "sortByDate": "Par date",
+  "sortByName": "Par nom",
+  "sortBySize": "Par taille",
+  "startDebugging": "Lancer le débogage",
+  "stepIn": "Entrer",
+  "stepOut": "Sortir",
+  "stepOver": "Passer",
+  "stopDebugging": "Arrêter le débogage",
+  "targetPlatforms": "PLATEFORMES CIBLES",
+  "uncensored": "Non censuré",
+  "unload": "Décharger",
+  "usages": "Utilisations",
+  "variables": "Variables",
+  "vibration": "Vibration",
+  "vision": "Vision",
+  "welcomeMessage": "Bienvenue dans votre environnement premium.",
+  "closeProjectConfirm": "Êtes-vous sûr de vouloir fermer ce projet ?",
+  "confirmDeleteMessage": "Supprimer uniquement de la liste ou aussi les fichiers ?",
+  "copy": "Copier",
+  "customModelHint": "Ou saisissez le nom du modèle manuellement...",
+  "decline": "Refuser",
+  "deleteFileConfirmMessage": "Êtes-vous sûr de vouloir supprimer ce fichier ?",
+  "deleteFileConfirmTitle": "Supprimer le fichier",
+  "deleteFileError": "Erreur de suppression : {error}",
+  "devCityL": "Ville ou localité (L)",
+  "devCountryC": "Code pays (C)",
+  "devNameCn": "Nom et prénom (CN)",
+  "devOrgO": "Organisation (O)",
+  "devStateS": "État ou province (S)",
+  "devUnitOu": "Unité organisationnelle (OU)",
+  "developerInfoDn": "Informations développeur (DN)",
+  "diskSpaceAnalysis": "Analyse de l'espace disque...",
+  "errorOccurred": "Erreur : {error}",
+  "failedToApplyAction": "Échec de l'application de l'action : {error}",
+  "fileDeletedSuccess": "Fichier supprimé avec succès",
+  "fileNotFoundOnDisk": "Fichier non trouvé sur le disque",
+  "fileSuccessfullyDeleted": "Fichier supprimé avec succès.",
+  "fileSuccessfullyWritten": "Fichier écrit avec succès.",
+  "findModels": "Trouver des modèles",
+  "fixWithAi": "Corriger avec l'IA",
+  "folderDistribution": "Répartition par dossiers",
+  "genKeystoreButton": "Générer le Keystore",
+  "genKeystoreError": "Erreur lors de la génération du Keystore : {error}",
+  "genKeystoreFailed": "Échec de la création du Keystore.",
+  "genKeystoreFillFields": "Remplissez les champs de génération de clé",
+  "genKeystoreProgress": "Génération du Keystore : {name}...",
+  "genKeystoreSuccess": "Keystore créé avec succès à : {name}",
+  "hapticFeedback": "Retour haptique",
+  "installApkError": "Erreur d'installation : {error}",
+  "installApkNotFound": "Fichier APK non trouvé : {path}",
+  "installApkProgress": "Démarrage de l'installation de l'APK : {apk}",
+  "installApkResult": "Résultat de l'installation : {msg}",
+  "keyAlias": "Alias de clé",
+  "keyAliasHint": "Alias de la clé (ex. key)",
+  "keyAliasPassword": "Mot de passe de l'alias de clé",
+  "keySaved": "Clé API enregistrée",
+  "keystoreFilenameHint": "Nom du fichier (ex. release.jks)",
+  "keystorePassword": "Mot de passe du Keystore",
+  "keystorePathHint": "Chemin complet vers le fichier .jks/.keystore",
+  "localNoKey": "Local — pas de clé",
+  "logPlaceholder": "Le journal de signature s'affichera ici.",
+  "logSignGen": "JOURNAL DE SIGNATURE ET GÉNÉRATION",
+  "modelInstalled": "Modèle défini sur {name}",
+  "modelLabel": "MODÈLE",
+  "modelsNotFound": "Aucun modèle trouvé.",
+  "newKeystoreParams": "Paramètres du nouveau Keystore",
+  "noErrorsDescription": "Aucun problème ou avertissement trouvé.",
+  "noHeavyFiles": "Aucun fichier volumineux",
+  "noOpenFiles": "Aucun fichier ouvert dans l'éditeur",
+  "ollamaPhoneHint": "Utilisez l'IP de votre ordinateur pour vous connecter depuis un téléphone",
+  "openAddressInBrowser": "Ouvrir cette adresse dans le navigateur",
+  "openProjectToSeeCommands": "Ouvrez un projet pour voir les commandes",
+  "outlineEmptyOrUnsupported": "Structure vide ou non supportée",
+  "outlineHeader": "Structure : {filename}",
+  "outputApkName": "Nom du fichier APK de sortie",
+  "parsingError": "Erreur d'analyse : {error}",
+  "patchAndroidBuildDescription": "Correctif android-36 / AGP 8.7.3 / compileSdk 35",
+  "problemsFound": "Problèmes trouvés : {count}",
+  "projectAnalysis": "Analyse du projet",
+  "projectFolderEmpty": "Dossier du projet vide",
+  "projectFolderNotFound": "Dossier du projet non trouvé",
+  "projectSize": "Taille du projet :",
+  "pureDark": "Sombre pur",
+  "quotaLimit": "Limite de quota",
+  "refreshProjectFiles": "Actualiser les fichiers du projet",
+  "requiresApiKeyLabel": "Nécessite une clé API",
+  "retry": "Réessayer",
+  "rootFiles": "[Fichiers à la racine]",
+  "runningCommand": "EXÉCUTION DE LA COMMANDE",
+  "scanningError": "Erreur de numérisation : {error}",
+  "searchCaseSensitive": "Sensible à la casse",
+  "searchError": "Erreur de recherche : {error}",
+  "searchInvalidRegex": "Expression régulière invalide",
+  "searchMatchesFound": "Correspondances trouvées dans les fichiers",
+  "searchModelHint": "Rechercher par nom de modèle...",
+  "searchNoMatches": "Aucune correspondance trouvée",
+  "searchPlaceholder": "Rechercher dans le contenu...",
+  "searchPrompt": "Entrez la requête de recherche",
+  "searchRegex": "Expression régulière",
+  "searchWholeWord": "Mot entier",
+  "searching": "Recherche...",
+  "searchingInProgress": "Recherche en cours...",
+  "selectApk": "Sélectionner l'APK",
+  "selectCustomPath": "Spécifier un chemin personnalisé...",
+  "selectKeystore": "Sélectionner le Keystore",
+  "selectModel": "Sélectionner le modèle",
+  "serverUrlLabel": "URL du serveur",
+  "showChanges": "Afficher les modifications",
+  "signApkButton": "Signer l'APK",
+  "signApkProgress": "Signature de l'APK : {apk}...",
+  "signError": "Erreur lors de la signature : {error}",
+  "signFilePickError": "Erreur de sélection du fichier : {error}",
+  "signFillAllFields": "Remplissez tous les champs de signature",
+  "signKeyFile": "Fichier de clé : {key} (alias : {alias})",
+  "signKeystoreSelected": "Keystore sélectionné : {path}",
+  "signNoApkSelected": "Aucun APK sélectionné",
+  "signNoKeystoreSelected": "Aucun Keystore sélectionné",
+  "signNoOpenProject": "Aucun projet ouvert",
+  "signProjectScanError": "Erreur de numérisation du projet : {error}",
+  "signRunningApksigner": "Exécution d'apksigner...",
+  "signSuccess": "APK signé avec succès !",
+  "signVerifyFailed": "Échec de la vérification de la signature.",
+  "signVerifying": "Vérification de la signature...",
+  "stepSelectApk": "Étape 1 : Sélectionner l'APK",
+  "stepSelectKeystore": "Étape 2 : Sélectionner le Keystore",
+  "stepSignSettings": "Étape 3 : Paramètres de signature",
+  "storePasswordHint": "Mot de passe du Keystore (minimum 6 caractères)",
+  "topHeavyFiles": "Top 10 des fichiers volumineux",
+  "ubuntuDarkPurple": "Ubuntu Violet Foncé",
+  "unavailable": "Indisponible",
+  "unknownActionType": "Type d'action inconnu : {type}",
+  "urlSaved": "URL enregistrée",
+  "wordWrapDescription": "Retour à la ligne souple dans l'éditeur",
+  "localRemoteHosts": "Hôtes locaux/distant",
+  "manageCliTools": "Gérer les outils CLI",
+  "providerActivated": "{name} activé",
+  "pubGet": "Pub Get",
+  "serverStarted": "Serveur démarré",
+  "showHiddenFilesDescription": "Afficher les fichiers .*",
+  "stopServer": "Arrêter",
+  "typeRunToStart": "Tapez run pour démarrer votre projet.",
+  "workingOnFile": "Je travaille sur le fichier : {file}.\nVoici son contenu :\n```\n{code}\n```\n\nMa question : {question}",
+  "you": "Vous",
+  "modeChat": "Chat",
+  "modeRefactor": "Refactor",
+  "modeAutopilot": "Autopilot",
+  "quickPromptRefactor": "Refactor",
+  "quickPromptRefactorText": "Refactor this code",
+  "quickPromptExplain": "Explain",
+  "quickPromptExplainText": "Explain how this code works",
+  "quickPromptFixErrors": "Fix Errors",
+  "quickPromptFixErrorsText": "Find and fix errors in this code",
+  "quickPromptOptimize": "Optimize",
+  "quickPromptOptimizeText": "Optimize performance of this code",
+  "quickPromptWriteTests": "Write Tests",
+  "quickPromptWriteTestsText": "Write unit tests for this code",
+  "actionReadingFile": "Lecture du fichier",
+  "actionViewingFolder": "Exploration du dossier",
+  "actionSearchingCode": "Recherche dans le code",
+  "actionFindingSymbol": "Recherche de symbole",
+  "actionCreatingFile": "Création du fichier",
+  "actionEditingFile": "Édition du fichier",
+  "actionDeletingFile": "Suppression du fichier",
+  "actionRunningCommand": "Exécution de la commande",
+  "actionWebSearch": "Recherche sur le web",
+  "actionFetchingPage": "Chargement de la page",
+  "actionMcpTool": "Outil MCP",
+  "actionExecuting": "Exécution de l'action",
+  "sessionRestored": "Session restaurée",
+  "sessionRestoredDetail": "{count} messages chargés depuis `.quantum/chat_history.json`.\nMémoire de l'agent : {files} fichiers en contexte.\nReprenez là où vous en étiez.",
+  "@sessionRestoredDetail": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "files": {
+        "type": "int"
+      }
+    }
+  },
+  "signInWithGitHub": "Se connecter avec GitHub",
+  "gitHubToken": "Jeton d'accès personnel GitHub",
+  "gitHubTokenHint": "Collez le GitHub Personal Access Token (avec autorisations repo)",
+  "connectGitHubDesc": "Connectez-vous pour parcourir vos dépôts, cloner des projets et lancer la compilation cloud.",
+  "cloneAndOpen": "Cloner et ouvrir",
+  "cloningRepository": "Clonage du dépôt...",
+  "repoClonedSuccess": "Dépôt cloné avec succès dans {path}",
+  "@repoClonedSuccess": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "cloneFailed": "Échec du clonage du dépôt. Vérifiez la connexion ou les autorisations du jeton.",
+  "cloudBuildApk": "Publier & Compiler l'APK dans le Cloud",
+  "cloudBuildApkDesc": "Créez une étiquette de version, poussez les modifications et déclenchez GitHub Actions pour compiler l'APK.",
+  "releaseTagName": "Étiquette de version",
+  "releaseTagNameHint": "ex. v1.0.0",
+  "releaseCommitMsg": "Message de commit",
+  "releaseCommitMsgHint": "ex. chore: préparer la version v1.0.0",
+  "releaseNotes": "Notes de version / Quoi de neuf",
+  "releaseNotesHint": "Décrivez ce qui a été ajouté, corrigé ou amélioré...",
+  "publishReleaseBtn": "Publier la version & compiler l'APK",
+  "releasingAndPushing": "Création du tag et envoi vers GitHub Actions...",
+  "releaseTriggeredSuccess": "Version {tag} créée et envoyée ! Compilation APK lancée sur GitHub Actions.",
+  "@releaseTriggeredSuccess": {
+    "placeholders": {
+      "tag": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseTriggerFailed": "Échec de l'envoi de la version : {error}",
+  "@releaseTriggerFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "setupCiCdWorkflow": "Ajouter le workflow CI/CD de compilation Cloud",
+  "setupCiCdWorkflowSuccess": "Workflow APK GitHub Actions ajouté (.github/workflows/build-apk.yml) !",
+  "sessionsTitle": "SESSIONS",
+  "sessionRunning": "En cours",
+  "sessionExited": "Arrêté",
+  "newSession": "Nouvelle session",
+  "terminalMenu": "Menu du terminal",
+  "splitScreen": "Diviser l'écran",
+  "mergeScreen": "Fusionner l'écran",
+  "keepScreenOn": "Garder l'écran allumé",
+  "keepScreenOnActive": "Écran allumé (actif)",
+  "interruptProcess": "Interrompre (Ctrl+C)",
+  "selectTextInTerminal": "Sélectionner du texte dans le terminal",
+  "closeSelection": "Fermer ✕",
+  "keypadKb": "Clavier",
+  "keypadMore": "Plus",
+  "installApk": "Installer l'APK",
+  "projectSync": "Synchronisation du projet",
+  "projectSynced": "Projet synchronisé",
+  "syncFailed": "Échec de la synchronisation",
+  "syncing": "Synchronisation...",
+  "shareProjectSyncLogs": "Quantum IDE - Journal de synchronisation",
+  "files": "Fichiers",
+  "editor": "Éditeur",
+  "closeOthers": "Fermer les autres",
+  "closeToRight": "Fermer à droite",
+  "copyPath": "Copier le chemin",
+  "insert": "Insérer",
+  "addCustomMcp": "Ajouter un MCP personnalisé",
+  "unifiedThemeTitle": "Thème unifié (Terminal + Éditeur + IDE)",
+  "unifiedThemeSubtitle": "Appliquer la palette du terminal à l'éditeur et à l'interface",
+  "palettesAndPresets": "Palettes, arrière-plan et préréglages (Conduit)",
+  "codeCrafterEngine": "Moteur Flutter CodeCrafter",
+  "codeCrafterEngineSubtitle": "Utiliser l'éditeur flutter_code_crafter (LSP, pliage, points d'arrêt, IA)",
+  "thinkingAgent": "Réflexions de l'agent",
+  "thinkingNow": "Réflexion…",
+  "generatingResponse": "Génération de la réponse…",
+  "runningAgentStep": "Exécution de l'étape…",
+  "exploredLabel": "Exploré",
+  "acceptFile": "Accepter le fichier",
+  "revertFile": "Annuler les modifications"
+}

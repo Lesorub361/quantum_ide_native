@@ -1,0 +1,533 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class SettingsState {
+  final ThemeMode themeMode;
+  final double fontSize;
+  final bool autoCompletion;
+  final bool aiAutoCompletion;
+  final bool wordWrap;
+  final bool lineNumbers;
+  final bool minimap;
+  final bool autoSave;
+  final double terminalFontSize;
+  final String terminalTheme;
+  final bool hapticFeedback;
+  final bool showHiddenFiles;
+  final String geminiModel;
+  final String flexScheme;
+  final int? customPrimaryColor;
+  final String editorTheme;
+  final String editorFontFamily;
+  final String terminalFontFamily;
+  final bool editorFontLigatures;
+  final double glassmorphismOpacity;
+  final double glassmorphismBlur;
+  final String hotkeysJson;
+  final bool formatOnSave;
+  final bool hardwareKeyboardMode;
+  final bool syncAppWithTerminalPalette;
+  final bool useCodeCrafterEditor;
+  final bool isInitialized;
+
+  SettingsState({
+    this.themeMode = ThemeMode.dark,
+    this.fontSize = 14.0,
+    this.autoCompletion = true,
+    this.aiAutoCompletion = true,
+    this.wordWrap = false,
+    this.lineNumbers = true,
+    this.minimap = false,
+    this.autoSave = true,
+    this.terminalFontSize = 13.0,
+    this.terminalTheme = 'ubuntu',
+    this.hapticFeedback = true,
+    this.showHiddenFiles = false,
+    this.geminiModel = 'gemini-2.5-flash',
+    this.flexScheme = 'mandyRed',
+    this.customPrimaryColor,
+    this.editorTheme = 'vs-dark',
+    this.editorFontFamily = 'Fira Code',
+    this.terminalFontFamily = 'JetBrains Mono',
+    this.editorFontLigatures = true,
+    this.glassmorphismOpacity = 0.15,
+    this.glassmorphismBlur = 0.0,
+    this.hotkeysJson = '{}',
+    this.formatOnSave = false,
+    this.hardwareKeyboardMode = false,
+    this.syncAppWithTerminalPalette = true,
+    this.useCodeCrafterEditor = true,
+    this.deepseekApiKey = '',
+    this.openrouterApiKey = '',
+    this.openaiApiKey = '',
+    this.anthropicApiKey = '',
+    this.geminiApiKey = '',
+    this.groqApiKey = '',
+    this.xaiApiKey = '',
+    this.mistralApiKey = '',
+    this.customApiBaseUrl = 'http://127.0.0.1:11434/v1',
+    this.customApiModel = 'qwen2.5-coder:7b',
+    this.customApiKey = '',
+    this.dshPort = 3080,
+    this.isInitialized = false,
+  });
+
+  final String deepseekApiKey;
+  final String openrouterApiKey;
+  final String openaiApiKey;
+  final String anthropicApiKey;
+  final String geminiApiKey;
+  final String groqApiKey;
+  final String xaiApiKey;
+  final String mistralApiKey;
+  final String customApiBaseUrl;
+  final String customApiModel;
+  final String customApiKey;
+  final int dshPort;
+
+  SettingsState copyWith({
+    ThemeMode? themeMode,
+    double? fontSize,
+    bool? autoCompletion,
+    bool? aiAutoCompletion,
+    bool? wordWrap,
+    bool? lineNumbers,
+    bool? minimap,
+    bool? autoSave,
+    double? terminalFontSize,
+    String? terminalTheme,
+    bool? hapticFeedback,
+    bool? showHiddenFiles,
+    String? geminiModel,
+    String? flexScheme,
+    int? customPrimaryColor,
+    bool clearCustomColor = false,
+    String? editorTheme,
+    String? editorFontFamily,
+    String? terminalFontFamily,
+    bool? editorFontLigatures,
+    double? glassmorphismOpacity,
+    double? glassmorphismBlur,
+    String? hotkeysJson,
+    bool? formatOnSave,
+    bool? hardwareKeyboardMode,
+    bool? syncAppWithTerminalPalette,
+    bool? useCodeCrafterEditor,
+    String? deepseekApiKey,
+    String? openrouterApiKey,
+    String? openaiApiKey,
+    String? anthropicApiKey,
+    String? geminiApiKey,
+    String? groqApiKey,
+    String? xaiApiKey,
+    String? mistralApiKey,
+    String? customApiBaseUrl,
+    String? customApiModel,
+    String? customApiKey,
+    int? dshPort,
+    bool? isInitialized,
+  }) {
+    return SettingsState(
+      themeMode: themeMode ?? this.themeMode,
+      fontSize: fontSize ?? this.fontSize,
+      autoCompletion: autoCompletion ?? this.autoCompletion,
+      aiAutoCompletion: aiAutoCompletion ?? this.aiAutoCompletion,
+      wordWrap: wordWrap ?? this.wordWrap,
+      lineNumbers: lineNumbers ?? this.lineNumbers,
+      minimap: minimap ?? this.minimap,
+      autoSave: autoSave ?? this.autoSave,
+      terminalFontSize: terminalFontSize ?? this.terminalFontSize,
+      terminalTheme: terminalTheme ?? this.terminalTheme,
+      hapticFeedback: hapticFeedback ?? this.hapticFeedback,
+      showHiddenFiles: showHiddenFiles ?? this.showHiddenFiles,
+      geminiModel: geminiModel ?? this.geminiModel,
+      flexScheme: flexScheme ?? this.flexScheme,
+      customPrimaryColor: clearCustomColor
+          ? null
+          : (customPrimaryColor ?? this.customPrimaryColor),
+      editorTheme: editorTheme ?? this.editorTheme,
+      editorFontFamily: editorFontFamily ?? this.editorFontFamily,
+      terminalFontFamily: terminalFontFamily ?? this.terminalFontFamily,
+      editorFontLigatures: editorFontLigatures ?? this.editorFontLigatures,
+      glassmorphismOpacity: glassmorphismOpacity ?? this.glassmorphismOpacity,
+      glassmorphismBlur: glassmorphismBlur ?? this.glassmorphismBlur,
+      hotkeysJson: hotkeysJson ?? this.hotkeysJson,
+      formatOnSave: formatOnSave ?? this.formatOnSave,
+      hardwareKeyboardMode: hardwareKeyboardMode ?? this.hardwareKeyboardMode,
+      syncAppWithTerminalPalette:
+          syncAppWithTerminalPalette ?? this.syncAppWithTerminalPalette,
+      useCodeCrafterEditor: useCodeCrafterEditor ?? this.useCodeCrafterEditor,
+      deepseekApiKey: deepseekApiKey ?? this.deepseekApiKey,
+      openrouterApiKey: openrouterApiKey ?? this.openrouterApiKey,
+      openaiApiKey: openaiApiKey ?? this.openaiApiKey,
+      anthropicApiKey: anthropicApiKey ?? this.anthropicApiKey,
+      geminiApiKey: geminiApiKey ?? this.geminiApiKey,
+      groqApiKey: groqApiKey ?? this.groqApiKey,
+      xaiApiKey: xaiApiKey ?? this.xaiApiKey,
+      mistralApiKey: mistralApiKey ?? this.mistralApiKey,
+      customApiBaseUrl: customApiBaseUrl ?? this.customApiBaseUrl,
+      customApiModel: customApiModel ?? this.customApiModel,
+      customApiKey: customApiKey ?? this.customApiKey,
+      dshPort: dshPort ?? this.dshPort,
+      isInitialized: isInitialized ?? this.isInitialized,
+    );
+  }
+}
+
+class SettingsService extends StateNotifier<SettingsState> {
+  SettingsService() : super(SettingsState()) {
+    _loadSettings();
+  }
+
+  static const _keyTheme = 'settings_theme';
+  static const _keyFontSize = 'settings_font_size';
+  static const _keyAutoCompletion = 'settings_auto_completion';
+  static const _keyAiAutoCompletion = 'settings_ai_auto_completion';
+  static const _keyWordWrap = 'settings_word_wrap';
+  static const _keyLineNumbers = 'settings_line_numbers';
+  static const _keyMinimap = 'settings_minimap';
+  static const _keyAutoSave = 'settings_auto_save';
+  static const _keyTerminalFontSize = 'settings_terminal_font_size';
+  static const _keyTerminalTheme = 'settings_terminal_theme';
+  static const _keyHapticFeedback = 'settings_haptic_feedback';
+  static const _keyShowHiddenFiles = 'settings_show_hidden_files';
+  static const _keyGeminiModel = 'settings_gemini_model';
+  static const _keyFlexScheme = 'settings_flex_scheme';
+  static const _keyCustomColor = 'settings_custom_color';
+  static const _keyEditorTheme = 'settings_editor_theme';
+  static const _keyEditorFontFamily = 'settings_editor_font_family';
+  static const _keyTerminalFontFamily = 'settings_terminal_font_family';
+  static const _keyEditorFontLigatures = 'settings_editor_font_ligatures';
+  static const _keyGlassmorphismOpacity = 'settings_glassmorphism_opacity';
+  static const _keyGlassmorphismBlur = 'settings_glassmorphism_blur';
+  static const _keyHotkeys = 'settings_hotkeys';
+  static const _keyFormatOnSave = 'settings_format_on_save_v2';
+  static const _keyDeepseekApiKey = 'settings_deepseek_api_key';
+  static const _keyOpenrouterApiKey = 'settings_openrouter_api_key';
+  static const _keyOpenaiApiKey = 'settings_openai_api_key';
+  static const _keyAnthropicApiKey = 'settings_anthropic_api_key';
+  static const _keyGeminiApiKey = 'settings_gemini_api_key';
+  static const _keyGroqApiKey = 'settings_groq_api_key';
+  static const _keyXaiApiKey = 'settings_xai_api_key';
+  static const _keyMistralApiKey = 'settings_mistral_api_key';
+  static const _keyCustomApiBaseUrl = 'settings_custom_api_base_url';
+  static const _keyCustomApiModel = 'settings_custom_api_model';
+  static const _keyCustomApiKey = 'settings_custom_api_key';
+  static const _keyDshPort = 'settings_dsh_port';
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    state = SettingsState(
+      themeMode:
+          ThemeMode.values[prefs.getInt(_keyTheme) ?? ThemeMode.dark.index],
+      fontSize: prefs.getDouble(_keyFontSize) ?? 14.0,
+      autoCompletion: prefs.getBool(_keyAutoCompletion) ?? true,
+      aiAutoCompletion: prefs.getBool(_keyAiAutoCompletion) ?? true,
+      wordWrap: prefs.getBool(_keyWordWrap) ?? false,
+      lineNumbers: prefs.getBool(_keyLineNumbers) ?? true,
+      minimap: prefs.getBool(_keyMinimap) ?? false,
+      autoSave: prefs.getBool(_keyAutoSave) ?? true,
+      terminalFontSize: prefs.getDouble(_keyTerminalFontSize) ?? 13.0,
+      terminalTheme: prefs.getString(_keyTerminalTheme) ?? 'ubuntu',
+      hapticFeedback: prefs.getBool(_keyHapticFeedback) ?? true,
+      showHiddenFiles: prefs.getBool(_keyShowHiddenFiles) ?? false,
+      geminiModel: (prefs.getString(_keyGeminiModel) == 'gemini-2.0-flash'
+          ? 'gemini-2.5-flash'
+          : (prefs.getString(_keyGeminiModel) ?? 'gemini-2.5-flash')),
+      flexScheme: prefs.getString(_keyFlexScheme) ?? 'mandyRed',
+      customPrimaryColor: prefs.getInt(_keyCustomColor),
+      editorTheme: prefs.getString(_keyEditorTheme) ?? 'vs-dark',
+      editorFontFamily: prefs.getString(_keyEditorFontFamily) ?? 'Fira Code',
+      terminalFontFamily:
+          prefs.getString(_keyTerminalFontFamily) ?? 'JetBrains Mono',
+      editorFontLigatures: prefs.getBool(_keyEditorFontLigatures) ?? true,
+      glassmorphismOpacity: prefs.getDouble(_keyGlassmorphismOpacity) ?? 0.15,
+      glassmorphismBlur: prefs.getDouble(_keyGlassmorphismBlur) ?? 0.0,
+      hotkeysJson: prefs.getString(_keyHotkeys) ?? '{}',
+      formatOnSave: prefs.getBool(_keyFormatOnSave) ?? false,
+      hardwareKeyboardMode: prefs.getBool('settings_hardware_keyboard_mode') ?? false,
+      syncAppWithTerminalPalette:
+          prefs.getBool('settings_sync_app_with_terminal_palette') ?? true,
+      useCodeCrafterEditor:
+          prefs.getBool('settings_use_code_crafter_editor') ?? true,
+      deepseekApiKey: prefs.getString(_keyDeepseekApiKey) ?? '',
+      openrouterApiKey: prefs.getString(_keyOpenrouterApiKey) ?? '',
+      openaiApiKey: prefs.getString(_keyOpenaiApiKey) ?? '',
+      anthropicApiKey: prefs.getString(_keyAnthropicApiKey) ?? '',
+      geminiApiKey: prefs.getString(_keyGeminiApiKey) ?? '',
+      groqApiKey: prefs.getString(_keyGroqApiKey) ?? '',
+      xaiApiKey: prefs.getString(_keyXaiApiKey) ?? '',
+      mistralApiKey: prefs.getString(_keyMistralApiKey) ?? '',
+      customApiBaseUrl:
+          prefs.getString(_keyCustomApiBaseUrl) ?? 'http://127.0.0.1:11434/v1',
+      customApiModel: prefs.getString(_keyCustomApiModel) ?? 'qwen2.5-coder:7b',
+      customApiKey: prefs.getString(_keyCustomApiKey) ?? '',
+      dshPort: prefs.getInt(_keyDshPort) ?? 3080,
+      isInitialized: true,
+    );
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    state = state.copyWith(themeMode: mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyTheme, mode.index);
+  }
+
+  Future<void> setSyncAppWithTerminalPalette(bool enabled) async {
+    state = state.copyWith(syncAppWithTerminalPalette: enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_sync_app_with_terminal_palette', enabled);
+  }
+
+  Future<void> setUseCodeCrafterEditor(bool enabled) async {
+    state = state.copyWith(useCodeCrafterEditor: enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_use_code_crafter_editor', enabled);
+  }
+
+  Future<void> applyWorkspacePreset({
+    required String terminalTheme,
+    required String editorTheme,
+    required String fontFamily,
+  }) async {
+    state = state.copyWith(
+      terminalTheme: terminalTheme,
+      editorTheme: editorTheme,
+      terminalFontFamily: fontFamily,
+      editorFontFamily: fontFamily,
+      syncAppWithTerminalPalette: true,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyTerminalTheme, terminalTheme);
+    await prefs.setString(_keyEditorTheme, editorTheme);
+    await prefs.setString(_keyTerminalFontFamily, fontFamily);
+    await prefs.setString(_keyEditorFontFamily, fontFamily);
+    await prefs.setBool('settings_sync_app_with_terminal_palette', true);
+  }
+
+  Future<void> setFontSize(double size) async {
+    state = state.copyWith(fontSize: size);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyFontSize, size);
+  }
+
+  Future<void> setAutoCompletion(bool v) async {
+    state = state.copyWith(autoCompletion: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoCompletion, v);
+  }
+
+  Future<void> setAiAutoCompletion(bool v) async {
+    state = state.copyWith(aiAutoCompletion: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAiAutoCompletion, v);
+  }
+
+  Future<void> setHardwareKeyboardMode(bool v) async {
+    state = state.copyWith(hardwareKeyboardMode: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_hardware_keyboard_mode', v);
+  }
+
+  Future<void> setWordWrap(bool v) async {
+    state = state.copyWith(wordWrap: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyWordWrap, v);
+  }
+
+  Future<void> setLineNumbers(bool v) async {
+    state = state.copyWith(lineNumbers: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLineNumbers, v);
+  }
+
+  Future<void> setMinimap(bool v) async {
+    state = state.copyWith(minimap: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyMinimap, v);
+  }
+
+  Future<void> setAutoSave(bool v) async {
+    state = state.copyWith(autoSave: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoSave, v);
+  }
+
+  Future<void> setTerminalFontSize(double size) async {
+    state = state.copyWith(terminalFontSize: size);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyTerminalFontSize, size);
+  }
+
+  Future<void> setTerminalTheme(String theme) async {
+    state = state.copyWith(terminalTheme: theme);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyTerminalTheme, theme);
+  }
+
+  Future<void> setTerminalFontFamily(String family) async {
+    state = state.copyWith(terminalFontFamily: family);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyTerminalFontFamily, family);
+  }
+
+  Future<void> setHapticFeedback(bool v) async {
+    state = state.copyWith(hapticFeedback: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyHapticFeedback, v);
+  }
+
+  Future<void> setShowHiddenFiles(bool v) async {
+    state = state.copyWith(showHiddenFiles: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowHiddenFiles, v);
+  }
+
+  Future<void> setGeminiModel(String model) async {
+    state = state.copyWith(geminiModel: model);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyGeminiModel, model);
+  }
+
+  Future<void> setFlexScheme(String scheme) async {
+    state = state.copyWith(flexScheme: scheme, clearCustomColor: true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyFlexScheme, scheme);
+    await prefs.remove(_keyCustomColor);
+  }
+
+  Future<void> setCustomPrimaryColor(Color? color) async {
+    if (color == null) {
+      state = state.copyWith(clearCustomColor: true);
+    } else {
+      state = state.copyWith(customPrimaryColor: color.toARGB32());
+    }
+    final prefs = await SharedPreferences.getInstance();
+    if (color != null) {
+      await prefs.setInt(_keyCustomColor, color.toARGB32());
+    } else {
+      await prefs.remove(_keyCustomColor);
+    }
+  }
+
+  Future<void> setEditorTheme(String theme) async {
+    state = state.copyWith(editorTheme: theme);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyEditorTheme, theme);
+  }
+
+  Future<void> setEditorFontFamily(String family) async {
+    state = state.copyWith(editorFontFamily: family);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyEditorFontFamily, family);
+  }
+
+  Future<void> setEditorFontLigatures(bool v) async {
+    state = state.copyWith(editorFontLigatures: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyEditorFontLigatures, v);
+  }
+
+  Future<void> setGlassmorphismOpacity(double v) async {
+    state = state.copyWith(glassmorphismOpacity: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyGlassmorphismOpacity, v);
+  }
+
+  Future<void> setGlassmorphismBlur(double v) async {
+    state = state.copyWith(glassmorphismBlur: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyGlassmorphismBlur, v);
+  }
+
+  Future<void> setHotkeysJson(String json) async {
+    state = state.copyWith(hotkeysJson: json);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyHotkeys, json);
+  }
+
+  Future<void> setFormatOnSave(bool v) async {
+    state = state.copyWith(formatOnSave: v);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyFormatOnSave, v);
+  }
+
+  Future<void> setDeepseekApiKey(String key) async {
+    state = state.copyWith(deepseekApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyDeepseekApiKey, key);
+  }
+
+  Future<void> setOpenrouterApiKey(String key) async {
+    state = state.copyWith(openrouterApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyOpenrouterApiKey, key);
+  }
+
+  Future<void> setOpenaiApiKey(String key) async {
+    state = state.copyWith(openaiApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyOpenaiApiKey, key);
+  }
+
+  Future<void> setAnthropicApiKey(String key) async {
+    state = state.copyWith(anthropicApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyAnthropicApiKey, key);
+  }
+
+  Future<void> setGeminiApiKey(String key) async {
+    state = state.copyWith(geminiApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyGeminiApiKey, key);
+  }
+
+  Future<void> setGroqApiKey(String key) async {
+    state = state.copyWith(groqApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyGroqApiKey, key);
+  }
+
+  Future<void> setXaiApiKey(String key) async {
+    state = state.copyWith(xaiApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyXaiApiKey, key);
+  }
+
+  Future<void> setMistralApiKey(String key) async {
+    state = state.copyWith(mistralApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyMistralApiKey, key);
+  }
+
+  Future<void> setCustomApiBaseUrl(String url) async {
+    state = state.copyWith(customApiBaseUrl: url);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCustomApiBaseUrl, url);
+  }
+
+  Future<void> setCustomApiModel(String model) async {
+    state = state.copyWith(customApiModel: model);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCustomApiModel, model);
+  }
+
+  Future<void> setCustomApiKey(String key) async {
+    state = state.copyWith(customApiKey: key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCustomApiKey, key);
+  }
+
+  Future<void> setDshPort(int port) async {
+    state = state.copyWith(dshPort: port);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyDshPort, port);
+  }
+}
+
+final settingsProvider = StateNotifierProvider<SettingsService, SettingsState>((
+  ref,
+) {
+  return SettingsService();
+});

@@ -1,0 +1,1299 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:re_editor/re_editor.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:conduit_vt/conduit_vt.dart' as xt;
+import 'package:open_filex/open_filex.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:diff_match_patch/diff_match_patch.dart';
+import 'package:quantum_ide/core/models/code_diagnostic.dart';
+
+
+import '../../../../core/services/diff_service.dart';
+import '../../../../core/services/lsp_service.dart';
+import '../../../../core/services/settings_service.dart';
+import '../../../../core/services/analysis_service.dart';
+import '../../../../core/services/workspace_service.dart';
+import '../../../git/presentation/notifiers/git_notifier.dart';
+import 'package:quantum_ide/core/services/symbol_indexer_service.dart';
+import 'package:quantum_ide/core/services/pty/pty_facade.dart';
+import 'package:quantum_ide/core/utils/path_mapper.dart';
+import 'package:quantum_ide/core/services/runtime_service.dart';
+import 'package:quantum_ide/core/services/collaboration_service.dart';
+import 'package:quantum_ide/core/services/fast_syntax_engine.dart';
+import 'package:quantum_ide/core/services/live_telemetry_service.dart';
+import 'package:quantum_ide/shared/providers/panel_provider.dart';
+import 'package:quantum_ide/features/terminal/presentation/notifiers/dedicated_terminal_notifier.dart';
+
+class EditorFile {
+  final String path;
+  final String name;
+  final CodeLineEditingController controller;
+  final String originalContent;
+  final List<DiffMarker> diffMarkers;
+  final List<CodeDiagnostic> diagnostics;
+  final bool isModified;
+  final bool isImage;
+  final bool isDiffView;
+  final bool isMarkdownPreview;
+
+  EditorFile({
+    required this.path,
+    required this.name,
+    required this.controller,
+    required this.originalContent,
+    this.diffMarkers = const [],
+    this.diagnostics = const [],
+    this.isModified = false,
+    this.isImage = false,
+    this.isDiffView = false,
+    this.isMarkdownPreview = false,
+  });
+
+  EditorFile copyWith({
+    bool? isModified,
+    CodeLineEditingController? controller,
+    List<DiffMarker>? diffMarkers,
+    List<CodeDiagnostic>? diagnostics,
+    String? originalContent,
+    bool? isImage,
+    bool? isDiffView,
+    bool? isMarkdownPreview,
+  }) {
+    return EditorFile(
+      path: path,
+      name: name,
+      controller: controller ?? this.controller,
+      isModified: isModified ?? this.isModified,
+      originalContent: originalContent ?? this.originalContent,
+      diffMarkers: diffMarkers ?? this.diffMarkers,
+      diagnostics: diagnostics ?? this.diagnostics,
+      isImage: isImage ?? this.isImage,
+      isDiffView: isDiffView ?? this.isDiffView,
+      isMarkdownPreview: isMarkdownPreview ?? this.isMarkdownPreview,
+    );
+  }
+}
+
+class EditorState {
+  final List<EditorFile> openFiles;
+  final int activeTabIndex;
+  final bool isAIPanelOpen;
+  final xt.Terminal? aiXtermTerminal;
+  final xt.TerminalController? aiXtermViewController;
+  final bool isAgentRunning;
+  final Map<String, List<CodeDiagnostic>> allDiagnostics;
+
+  EditorState({
+    this.openFiles = const [],
+    this.activeTabIndex = 0,
+    this.isAIPanelOpen = false,
+    this.aiXtermTerminal,
+    this.aiXtermViewController,
+    this.isAgentRunning = false,
+    this.allDiagnostics = const {},
+  });
+
+  String? get activeFilePath => openFiles.isEmpty || activeTabIndex >= openFiles.length 
+    ? null : openFiles[activeTabIndex].path;
+
+  EditorState copyWith({
+    List<EditorFile>? openFiles,
+    int? activeTabIndex,
+    bool? isAIPanelOpen,
+    xt.Terminal? aiXtermTerminal,
+    xt.TerminalController? aiXtermViewController,
+    bool? isAgentRunning,
+    Map<String, List<CodeDiagnostic>>? allDiagnostics,
+  }) {
+    return EditorState(
+      openFiles: openFiles ?? this.openFiles,
+      activeTabIndex: activeTabIndex ?? this.activeTabIndex,
+      isAIPanelOpen: isAIPanelOpen ?? this.isAIPanelOpen,
+      aiXtermTerminal: aiXtermTerminal ?? this.aiXtermTerminal,
+      aiXtermViewController: aiXtermViewController ?? this.aiXtermViewController,
+      isAgentRunning: isAgentRunning ?? this.isAgentRunning,
+      allDiagnostics: allDiagnostics ?? this.allDiagnostics,
+    );
+  }
+}
+
+final editorProvider = StateNotifierProvider<EditorNotifier, EditorState>((ref) {
+  return EditorNotifier(ref);
+});
+
+class EditorNotifier extends StateNotifier<EditorState> with WidgetsBindingObserver {
+  final Ref ref;
+  late final LspService _lspService;
+  Timer? _diffTimer;
+  final Map<String, Timer> _autoSaveTimers = {};
+  final Set<String> _savingPaths = {};
+  final Map<String, CodeLines> _lastCodeLines = {};
+  final DiffService _diffService = DiffService();
+  static const int _maxOpenFiles = 10;
+
+  Pty? _agentPty;
+  StreamSubscription<Uint8List>? _agentPtySubscription;
+  StreamSubscription<FileSystemEvent>? _workspaceWatcherSubscription;
+  Timer? _autoHotReloadTimer;
+  bool _isReloadingFromDisk = false;
+
+  EditorNotifier(this.ref) : super(EditorState()) {
+    _init();
+    WidgetsBinding.instance.addObserver(this);
+    
+    // Listen for workspace changes
+    ref.listen<WorkspaceState>(workspaceProvider, (previous, next) {
+      if (next.currentPath == null) {
+        clearWorkspace();
+      } else if (previous?.currentPath != next.currentPath) {
+        clearWorkspace();
+        loadWorkspaceFiles(next.currentPath!);
+      }
+    });
+  }
+
+  void _init() {
+    try {
+      final terminal = xt.Terminal(maxLines: 5000);
+      final controller = xt.TerminalController();
+      state = state.copyWith(
+        aiXtermTerminal: terminal,
+        aiXtermViewController: controller,
+      );
+    } catch (e) {
+      debugPrint('Failed to initialize AI Terminal Controller: $e');
+    }
+    
+    // Initialize LSP
+    _lspService = ref.read(lspServiceProvider);
+    
+    // Listen to diagnostics
+    _lspService.diagnosticsStream.listen((fileDiagnostics) {
+      updateDiagnostics(fileDiagnostics.path, fileDiagnostics.diagnostics);
+    });
+
+    // Connect LiveTelemetryService reload callback
+    LiveTelemetryService.instance.onFileUpdated = reloadFileFromDisk;
+
+    // Defer heavy workspace loading to avoid blocking initial UI render
+    Future.microtask(() {
+      final activeWorkspace = ref.read(workspaceProvider).currentPath;
+      if (activeWorkspace != null) {
+        loadWorkspaceFiles(activeWorkspace);
+      }
+    });
+  }
+
+
+  Future<void> openFile(String path, {int? line, int? column, bool isDiffView = false, String? overrideOriginalContent}) async {
+    final existingIndex = state.openFiles.indexWhere((f) => f.path == path);
+    if (existingIndex != -1) {
+      final file = state.openFiles[existingIndex];
+      final updatedFile = file.copyWith(isDiffView: isDiffView);
+      final newOpenFiles = [...state.openFiles];
+      newOpenFiles[existingIndex] = updatedFile;
+
+      state = state.copyWith(
+        openFiles: newOpenFiles,
+        activeTabIndex: existingIndex,
+      );
+      if (line != null && column != null) {
+        final controller = state.openFiles[existingIndex].controller;
+        controller.selection = CodeLineSelection.fromPosition(position: CodeLinePosition(index: line, offset: column));
+      }
+      _persistWorkspaceFiles();
+      return;
+    }
+
+    if (path.toLowerCase().endsWith('.apk')) {
+      try {
+        await OpenFilex.open(path);
+        return;
+      } catch (e) {
+        debugPrint('Error opening APK: $e');
+      }
+    }
+
+    final lowerPath = path.toLowerCase();
+    final isImg = lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.gif') ||
+        lowerPath.endsWith('.webp') ||
+        lowerPath.endsWith('.bmp') ||
+        lowerPath.endsWith('.ico');
+
+    if (isImg) {
+      final controller = CodeLineEditingController(
+        codeLines: CodeLines.fromText(''),
+      );
+      final newFile = EditorFile(
+        path: path,
+        name: path.split(Platform.pathSeparator).last,
+        controller: controller,
+        originalContent: '',
+        isImage: true,
+      );
+      final newList = [...state.openFiles, newFile];
+      state = state.copyWith(
+        openFiles: newList,
+        activeTabIndex: newList.length - 1,
+      );
+      _persistWorkspaceFiles();
+      return;
+    }
+
+    try {
+      final content = await _readTextFile(path);
+      if (content == null) {
+        debugPrint('File $path is binary, attempting to open with system handler.');
+        await OpenFilex.open(path);
+        return;
+      }
+      
+      // Enforce max open files limit
+      if (state.openFiles.length >= _maxOpenFiles) {
+        final oldestPath = state.openFiles[0].path;
+        _autoSaveTimers[oldestPath]?.cancel();
+        _autoSaveTimers.remove(oldestPath);
+        final newOpenFiles = state.openFiles.sublist(1);
+        final adjustedIndex = state.activeTabIndex > 0 ? state.activeTabIndex - 1 : 0;
+        state = state.copyWith(
+          openFiles: newOpenFiles,
+          activeTabIndex: adjustedIndex,
+        );
+      }
+      
+      final controller = CodeLineEditingController(
+        codeLines: CodeLines.fromText(content),
+      );
+
+      if (line != null && column != null) {
+        controller.selection = CodeLineSelection.fromPosition(position: CodeLinePosition(index: line, offset: column));
+      }
+ 
+      final newFile = EditorFile(
+        path: path,
+        name: path.split(Platform.pathSeparator).last,
+        controller: controller,
+        originalContent: overrideOriginalContent ?? content,
+        isDiffView: isDiffView,
+      );
+
+      _lastCodeLines[path] = controller.codeLines;
+      controller.addListener(() {
+        final currentLines = controller.codeLines;
+        if (!identical(_lastCodeLines[path], currentLines)) {
+          _lastCodeLines[path] = currentLines;
+          _handleContentChange(path);
+        }
+        _handleCursorMove(path);
+      });
+
+      final newList = [...state.openFiles, newFile];
+      state = state.copyWith(
+        openFiles: newList,
+        activeTabIndex: newList.length - 1,
+      );
+
+      _persistWorkspaceFiles();
+
+      // Handle LSP open safely
+      _lspService.onFileOpened(path, content).catchError((e) {
+        debugPrint('LSP error opening file: $e');
+      });
+
+      // Handle Collaboration Sync
+      ref.read(collaborationProvider.notifier).initializeFileSync(path, content);
+      _handleCursorMove(path);
+      
+
+      
+    } catch (e) {
+      debugPrint('Error opening file: $e');
+    }
+  }
+
+  Future<String?> _readTextFile(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+
+      // Self-healing inside IDE: if file is 0 bytes,
+      // automatically try restoring it from local Git history (git show HEAD:<relPath>)!
+      if (await file.length() == 0) {
+        final ws = ref.read(workspaceProvider).currentPath;
+        if (ws != null && path.startsWith(ws) && await Directory(p.join(ws, '.git')).exists()) {
+          try {
+            final rel = p.relative(path, from: ws);
+            final res = await Process.run(
+              'git',
+              ['show', 'HEAD:$rel'],
+              workingDirectory: ws,
+            ).timeout(const Duration(seconds: 3));
+            final out = res.stdout?.toString() ?? '';
+            if (res.exitCode == 0 && out.isNotEmpty) {
+              await file.writeAsString(out, flush: true);
+              return out;
+            }
+          } catch (_) {}
+        }
+      }
+      
+      final raf = file.openSync(mode: FileMode.read);
+      final checkLimit = raf.lengthSync() < 8192 ? raf.lengthSync() : 8192;
+      final buffer = Uint8List(checkLimit);
+      raf.readIntoSync(buffer);
+      raf.closeSync();
+      
+      for (int i = 0; i < buffer.length; i++) {
+        if (buffer[i] == 0) return null;
+      }
+      
+      return await file.readAsString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void setDiffView(String path, bool isDiffView) {
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final newOpenFiles = [...state.openFiles];
+    newOpenFiles[index] = file.copyWith(isDiffView: isDiffView);
+    state = state.copyWith(openFiles: newOpenFiles);
+  }
+
+  void setMarkdownPreview(String path, bool isPreview) {
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final newOpenFiles = [...state.openFiles];
+    newOpenFiles[index] = file.copyWith(isMarkdownPreview: isPreview);
+    state = state.copyWith(openFiles: newOpenFiles);
+  }
+
+  void toggleMarkdownPreview(String path) {
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final newOpenFiles = [...state.openFiles];
+    newOpenFiles[index] = file.copyWith(isMarkdownPreview: !file.isMarkdownPreview);
+    state = state.copyWith(openFiles: newOpenFiles);
+  }
+
+  void _handleContentChange(String path, {bool triggerAutoSave = true}) {
+    if (_isReloadingFromDisk) return;
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    
+    // Broadcast text changes for collaboration only if a live session is actually connected
+    final collabState = ref.read(collaborationProvider);
+    if (collabState.isConnected) {
+      final collabService = ref.read(collaborationProvider.notifier);
+      if (!collabService.isApplyingRemoteChange) {
+        collabService.handleLocalChange(path, file.controller.text);
+      }
+    }
+
+    // Mark modified in O(1) without joining all lines into a String on every keystroke
+    if (!file.isModified) {
+      if (!mounted) return;
+      final newOpenFiles = List<EditorFile>.from(state.openFiles);
+      newOpenFiles[index] = file.copyWith(isModified: true);
+      state = state.copyWith(openFiles: newOpenFiles);
+    }
+
+    _diffTimer?.cancel();
+    _diffTimer = Timer(const Duration(milliseconds: 600), () {
+      _updateDiff(path);
+      // Re-read text at timer fire time to avoid stale closure
+      final latestIdx = state.openFiles.indexWhere((f) => f.path == path);
+      if (latestIdx != -1) {
+        final text = state.openFiles[latestIdx].controller.text;
+        // Instant in-process FastSyntaxEngine (<1ms, <1MB RAM)
+        final fastDiags = FastSyntaxEngine.instance.analyze(path, text);
+        if (fastDiags.isNotEmpty || (state.allDiagnostics[path]?.isNotEmpty ?? false)) {
+          updateDiagnostics(path, fastDiags);
+        }
+        _lspService.onFileChanged(path, text).catchError((e) {
+          debugPrint('LSP error changing file: $e');
+        });
+      }
+      ref.read(analysisServiceProvider).triggerAnalysis();
+    });
+
+    if (triggerAutoSave) {
+      _autoSaveTimers[path]?.cancel();
+      _autoSaveTimers[path] = Timer(const Duration(seconds: 5), () {
+        saveFileByPath(path, isAutoSave: true);
+        _autoSaveTimers.remove(path);
+      });
+    }
+  }
+
+  void _handleCursorMove(String path) {
+    final collabState = ref.read(collaborationProvider);
+    if (!collabState.isConnected) return;
+
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final selection = file.controller.selection;
+
+    final collabService = ref.read(collaborationProvider.notifier);
+    if (collabService.isApplyingRemoteChange) return;
+
+    final extent = selection.extent;
+    final base = selection.base;
+
+    collabService.handleLocalCursorMove(
+      path,
+      extent.index,
+      extent.offset,
+      selection.isCollapsed ? -1 : base.index,
+      selection.isCollapsed ? -1 : base.offset,
+      selection.isCollapsed ? -1 : extent.index,
+      selection.isCollapsed ? -1 : extent.offset,
+    );
+  }
+
+  void _updateDiff(String path) async {
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final markers = await _diffService.calculateDiff(file.originalContent, file.controller.text);
+
+    if (!mounted) return;
+    final newOpenFiles = [...state.openFiles];
+    final latestIndex = newOpenFiles.indexWhere((f) => f.path == path);
+    if (latestIndex == -1) return;
+
+    newOpenFiles[latestIndex] = file.copyWith(diffMarkers: markers);
+    state = state.copyWith(openFiles: newOpenFiles);
+  }
+
+  Future<void> updateFileContentFromAI(String targetPathOrName, String newContent) async {
+    final workspacePath = ref.read(workspaceProvider).currentPath;
+    
+    // 1. Resolve full path
+    String fullPath = targetPathOrName;
+    if (workspacePath != null && !targetPathOrName.startsWith('/')) {
+      fullPath = p.join(workspacePath, targetPathOrName);
+    }
+
+    // 2. Save directly to disk
+    try {
+      final file = File(fullPath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(newContent);
+    } catch (e) {
+      debugPrint('Failed to save AI content to $fullPath: $e');
+    }
+
+    // 3. Open or switch to the target tab
+    await openFile(fullPath);
+
+    // 4. Update editor controller and diff
+    final index = state.openFiles.indexWhere((f) => f.path == fullPath || p.basename(f.path) == p.basename(targetPathOrName));
+    if (index != -1) {
+      final file = state.openFiles[index];
+      file.controller.text = newContent;
+      _updateDiff(file.path);
+      _handleContentChange(file.path, triggerAutoSave: false);
+      _autoSaveTimers[file.path]?.cancel();
+      _autoSaveTimers.remove(file.path);
+    }
+  }
+
+  void closeTab(int index) {
+    if (index < 0 || index >= state.openFiles.length) return;
+    final closingFile = state.openFiles[index];
+    final path = closingFile.path;
+    _autoSaveTimers[path]?.cancel();
+    _autoSaveTimers.remove(path);
+    _lastCodeLines.remove(path);
+    try {
+      closingFile.controller.dispose();
+    } catch (_) {}
+
+    final newList = List<EditorFile>.from(state.openFiles);
+    newList.removeAt(index);
+
+    int newActiveIndex = state.activeTabIndex;
+    if (newActiveIndex >= newList.length) {
+      newActiveIndex = newList.isEmpty ? 0 : newList.length - 1;
+    }
+
+    state = state.copyWith(
+      openFiles: newList,
+      activeTabIndex: newActiveIndex,
+    );
+    _persistWorkspaceFiles();
+  }
+
+  Future<void> saveFile(int index, {bool isAutoSave = false}) async {
+    if (index < 0 || index >= state.openFiles.length) return;
+    final path = state.openFiles[index].path;
+    await saveFileByPath(path, isAutoSave: isAutoSave);
+  }
+
+  Future<void> saveFileByPath(String path, {bool isAutoSave = false}) async {
+    if (_savingPaths.contains(path)) return;
+    final index = state.openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return;
+
+    final initialFile = state.openFiles[index];
+    // Never touch or overwrite unmodified files during background/lifecycle auto-saves
+    if (isAutoSave && !initialFile.isModified) return;
+
+    _savingPaths.add(path);
+    try {
+      final settings = ref.read(settingsProvider);
+      if (!isAutoSave && settings.formatOnSave && initialFile.isModified) {
+        try {
+          await _lspService.onFileChanged(path, initialFile.controller.text);
+          final edits = await _lspService.format(path);
+          if (edits.isNotEmpty) {
+            final jsonEdits = edits.map((e) => {
+              'range': {
+                'start': {
+                  'line': e.range.start.line,
+                  'character': e.range.start.character,
+                },
+                'end': {
+                  'line': e.range.end.line,
+                  'character': e.range.end.character,
+                }
+              },
+              'newText': e.newText,
+            }).toList();
+            applyLSPEdits(path, jsonEdits);
+          }
+        } catch (e) {
+          debugPrint('Error formatting before save: $e');
+        }
+      }
+
+      final currentIdx = state.openFiles.indexWhere((f) => f.path == path);
+      if (currentIdx == -1) return;
+      final file = state.openFiles[currentIdx];
+      final content = file.controller.text;
+
+      final diskFile = File(path);
+      if (content.trim().isEmpty && await diskFile.exists() && await diskFile.length() > 0) {
+        // Never overwrite a non-empty file on disk with an empty controller buffer; reload instead!
+        await reloadFileFromDisk(path);
+        return;
+      }
+      await diskFile.writeAsString(content, flush: true);
+
+      // Re-verify index after await
+      final afterIndex = state.openFiles.indexWhere((f) => f.path == path);
+      if (afterIndex == -1) return;
+
+      final currentFile = state.openFiles[afterIndex];
+      final newOpenFiles = List<EditorFile>.from(state.openFiles);
+      newOpenFiles[afterIndex] = currentFile.copyWith(
+        originalContent: content,
+        diffMarkers: const [],
+        isModified: false,
+      );
+      state = state.copyWith(openFiles: newOpenFiles);
+
+      // Trigger immediate analysis on save
+      ref.read(analysisServiceProvider).triggerAnalysis(immediate: true);
+      ref.read(gitProvider.notifier).refreshStatus();
+      ref.read(symbolIndexerProvider.notifier).indexFile(path);
+
+      if (path.toLowerCase().endsWith('.dart') &&
+          ref.read(flutterAutoHotReloadProvider)) {
+        final runSession =
+            ref.read(dedicatedTerminalProvider).sessions[DedicatedTerminalType.run];
+        if (runSession != null && !runSession.isExited) {
+          _autoHotReloadTimer?.cancel();
+          _autoHotReloadTimer = Timer(const Duration(milliseconds: 400), () {
+            final currentRun = ref
+                .read(dedicatedTerminalProvider)
+                .sessions[DedicatedTerminalType.run];
+            if (currentRun != null &&
+                !currentRun.isExited &&
+                ref.read(flutterAutoHotReloadProvider)) {
+              ref
+                  .read(dedicatedTerminalProvider.notifier)
+                  .sendRawChar(DedicatedTerminalType.run, 'r');
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error saving file $path: $e');
+    } finally {
+      _savingPaths.remove(path);
+    }
+  }
+
+  void setActiveTab(int index) {
+    if (index < 0 || index >= state.openFiles.length) return;
+    state = state.copyWith(activeTabIndex: index);
+    _persistWorkspaceFiles();
+
+    // Notify collaboration about active tab change
+    if (state.openFiles.isNotEmpty && index < state.openFiles.length) {
+      _handleCursorMove(state.openFiles[index].path);
+    }
+  }
+
+  void updateDiagnostics(String path, List<CodeDiagnostic> diagnostics) {
+    // Only accept diagnostics for files that are within the current workspace path
+    final workspacePath = ref.read(workspaceProvider).currentPath;
+    if (workspacePath == null || !path.startsWith(workspacePath)) {
+      return;
+    }
+
+    // Early exit: skip rebuild if both old and new are empty
+    final existing = state.allDiagnostics[path];
+    if (existing != null && existing.isEmpty && diagnostics.isEmpty) return;
+
+    final newAllDiagnostics = Map<String, List<CodeDiagnostic>>.from(state.allDiagnostics);
+    newAllDiagnostics[path] = diagnostics;
+
+    // Check if file is currently open before building a new openFiles list
+    final openFileIndex = state.openFiles.indexWhere((f) => f.path == path);
+
+    Future.microtask(() {
+      if (!mounted) return;
+      if (openFileIndex == -1) {
+        // File is not open — only update diagnostics map, skip openFiles rebuild
+        state = state.copyWith(allDiagnostics: newAllDiagnostics);
+        return;
+      }
+      final newOpenFiles = List<EditorFile>.from(state.openFiles);
+      final latestIndex = newOpenFiles.indexWhere((f) => f.path == path);
+      if (latestIndex == -1) {
+        state = state.copyWith(allDiagnostics: newAllDiagnostics);
+        return;
+      }
+      newOpenFiles[latestIndex] = newOpenFiles[latestIndex].copyWith(diagnostics: diagnostics);
+      state = state.copyWith(
+        allDiagnostics: newAllDiagnostics,
+        openFiles: newOpenFiles,
+      );
+    });
+  }
+
+  void clearDiagnostics() {
+    final newOpenFiles = state.openFiles
+        .map((file) => file.copyWith(diagnostics: const []))
+        .toList();
+    state = state.copyWith(allDiagnostics: {}, openFiles: newOpenFiles);
+  }
+
+  Future<void> _persistWorkspaceFiles() async {
+    final workspacePath = ref.read(workspaceProvider).currentPath;
+    if (workspacePath == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final paths = state.openFiles.map((f) => f.path).toList();
+      final keyPaths = 'open_files_$workspacePath';
+      final keyActive = 'active_tab_$workspacePath';
+      
+      int activeIndex = state.activeTabIndex;
+      if (activeIndex < 0) activeIndex = 0;
+      
+      await prefs.setStringList(keyPaths, paths);
+      await prefs.setInt(keyActive, activeIndex);
+    } catch (e) {
+      debugPrint('Error persisting workspace files: $e');
+    }
+  }
+
+  Future<void> loadWorkspaceFiles(String workspacePath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keyPaths = 'open_files_$workspacePath';
+      final keyActive = 'active_tab_$workspacePath';
+      final paths = prefs.getStringList(keyPaths) ?? [];
+      final activeIndex = prefs.getInt(keyActive) ?? 0;
+      
+      clearWorkspace();
+      _startWorkspaceWatcher(workspacePath);
+
+      final validPaths = <String>[];
+      for (final p in paths) {
+        if (await File(p).exists()) validPaths.add(p);
+      }
+      if (validPaths.isEmpty) return;
+      
+      // Load active file first for better perceived performance
+      int targetIndex = activeIndex < validPaths.length ? activeIndex : 0;
+      if (targetIndex < 0) targetIndex = 0;
+      
+      final activePath = validPaths[targetIndex];
+      final activeFile = await _loadSingleFile(activePath);
+      
+      if (activeFile != null) {
+        state = state.copyWith(
+          openFiles: [activeFile],
+          activeTabIndex: 0,
+        );
+      }
+
+      // Load remaining files in background
+      Future.microtask(() async {
+        final List<EditorFile> otherFiles = [];
+        for (int i = 0; i < validPaths.length; i++) {
+          if (i == targetIndex) continue;
+          final file = await _loadSingleFile(validPaths[i]);
+          if (file != null) otherFiles.add(file);
+          // Yield to UI thread between files
+          await Future.delayed(Duration.zero);
+        }
+        
+        if (mounted) {
+          final List<EditorFile?> orderedFiles = List.filled(validPaths.length, null);
+          orderedFiles[targetIndex] = activeFile;
+          
+          int otherIdx = 0;
+          for(int i=0; i<validPaths.length; i++) {
+            if (i == targetIndex) continue;
+            if (otherIdx < otherFiles.length) {
+               orderedFiles[i] = otherFiles[otherIdx++];
+            }
+          }
+          
+          final nonNullFiles = orderedFiles.whereType<EditorFile>().toList();
+          state = state.copyWith(
+            openFiles: nonNullFiles,
+            activeTabIndex: activeFile != null ? nonNullFiles.indexOf(activeFile) : 0,
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('Error loading workspace files: $e');
+    }
+  }
+
+  Future<EditorFile?> _loadSingleFile(String path) async {
+    try {
+      final lowerPath = path.toLowerCase();
+      final isImg = lowerPath.endsWith('.png') ||
+          lowerPath.endsWith('.jpg') ||
+          lowerPath.endsWith('.jpeg') ||
+          lowerPath.endsWith('.gif') ||
+          lowerPath.endsWith('.webp') ||
+          lowerPath.endsWith('.bmp') ||
+          lowerPath.endsWith('.ico');
+
+      if (isImg) {
+        return EditorFile(
+          path: path,
+          name: path.split(Platform.pathSeparator).last,
+          controller: CodeLineEditingController(codeLines: CodeLines.fromText('')),
+          originalContent: '',
+          isImage: true,
+        );
+      }
+
+      final content = await _readTextFile(path);
+      if (content == null) return null;
+      
+      final controller = CodeLineEditingController(
+        codeLines: CodeLines.fromText(content),
+      );
+      _lastCodeLines[path] = controller.codeLines;
+      controller.addListener(() {
+        final currentLines = controller.codeLines;
+        if (!identical(_lastCodeLines[path], currentLines)) {
+          _lastCodeLines[path] = currentLines;
+          _handleContentChange(path);
+        }
+        _handleCursorMove(path);
+      });
+      
+      final editorFile = EditorFile(
+        path: path,
+        name: path.split(Platform.pathSeparator).last,
+        controller: controller,
+        originalContent: content,
+      );
+      
+      // Instant in-process FastSyntaxEngine analysis on file open (<1ms)
+      final fastDiags = FastSyntaxEngine.instance.analyze(path, content);
+      if (fastDiags.isNotEmpty) {
+        updateDiagnostics(path, fastDiags);
+      }
+
+      // Handle LSP open and diagnostics in background safely
+      ref.read(collaborationProvider.notifier).initializeFileSync(path, content);
+      _lspService.onFileOpened(path, content).then((_) {
+        _lspService.getDiagnostics(path).then((diagnostics) {
+          updateDiagnostics(path, diagnostics);
+        }).catchError((e) {
+          debugPrint('LSP error getting diagnostics: $e');
+        });
+      }).catchError((e) {
+        debugPrint('LSP error opening file: $e');
+      });
+
+      return editorFile;
+    } catch (e) {
+      debugPrint('Error loading file $path: $e');
+      return null;
+    }
+  }
+
+  void clearWorkspace() {
+    _workspaceWatcherSubscription?.cancel();
+    _workspaceWatcherSubscription = null;
+    stopAgent();
+    for (final timer in _autoSaveTimers.values) {
+      timer.cancel();
+    }
+    _autoSaveTimers.clear();
+    for (final file in state.openFiles) {
+      try {
+        file.controller.dispose();
+      } catch (_) {}
+    }
+    _lastCodeLines.clear();
+    state = EditorState();
+  }
+
+  final Map<String, Timer> _watcherDebouncers = {};
+
+  void _startWorkspaceWatcher(String workspacePath) {
+    _workspaceWatcherSubscription?.cancel();
+    for (final t in _watcherDebouncers.values) {
+      t.cancel();
+    }
+    _watcherDebouncers.clear();
+    try {
+      _workspaceWatcherSubscription = Directory(workspacePath).watch().listen(
+        (event) {
+          final eventPath = event.path;
+          _watcherDebouncers[eventPath]?.cancel();
+          _watcherDebouncers[eventPath] = Timer(
+            const Duration(milliseconds: 350),
+            () {
+              _watcherDebouncers.remove(eventPath);
+              reloadFileFromDisk(eventPath);
+            },
+          );
+        },
+        onError: (e) {
+          debugPrint('Workspace watcher error: $e');
+        },
+      );
+    } catch (e) {
+      debugPrint('Failed to start workspace watcher: $e');
+    }
+  }
+
+  Future<void> reloadFileFromDisk(String path) async {
+    final normalisedPath = p.normalize(path);
+    try {
+      final content = await _readTextFile(normalisedPath);
+      if (content == null) return;
+
+      final index = state.openFiles.indexWhere((f) => p.normalize(f.path) == normalisedPath);
+      if (index != -1) {
+        final openFile = state.openFiles[index];
+        // Critical protection: never wipe a non-empty open editor tab if disk momentarily reads empty (O_TRUNC)
+        if (content.trim().isEmpty && openFile.controller.text.trim().isNotEmpty) {
+          try {
+            await File(normalisedPath).writeAsString(openFile.controller.text, flush: true);
+          } catch (_) {}
+          return;
+        }
+      }
+
+      // Always re-run FastSyntaxEngine so stale diagnostics on fixed files disappear immediately
+      final fastDiags = FastSyntaxEngine.instance.analyze(normalisedPath, content);
+      updateDiagnostics(normalisedPath, fastDiags);
+
+      if (index == -1) return;
+
+      final openFile = state.openFiles[index];
+      if (openFile.controller.text != content) {
+        _autoSaveTimers[normalisedPath]?.cancel();
+        _autoSaveTimers.remove(normalisedPath);
+
+        _isReloadingFromDisk = true;
+        try {
+          openFile.controller.text = content;
+          _lastCodeLines[normalisedPath] = openFile.controller.codeLines;
+        } finally {
+          _isReloadingFromDisk = false;
+        }
+
+        final updatedFile = openFile.copyWith(
+          originalContent: content,
+          isModified: false,
+          diagnostics: fastDiags,
+        );
+        final newOpenFiles = List<EditorFile>.from(state.openFiles);
+        newOpenFiles[index] = updatedFile;
+        state = state.copyWith(openFiles: newOpenFiles);
+        _updateDiff(normalisedPath);
+      }
+    } catch (e) {
+      debugPrint('Error reloading changed file: $e');
+    }
+  }
+
+  void runAgentCommand(String command) async {
+    debugPrint('Running agent command: $command');
+    
+    // Stop any existing agent session
+    stopAgent();
+    
+    final runtime = ref.read(runtimeServiceProvider);
+    final workspace = ref.read(workspaceProvider);
+    
+    String dir = workspace.currentPath ?? runtime.workingDirectory;
+    dir = PathMapper.mapToGuest(dir, runtime.appDirectory);
+    
+    final env = Map<String, String>.from(runtime.env);
+    
+    final shell = Platform.isAndroid
+        ? '/system/bin/sh'
+        : (Platform.isWindows ? 'cmd.exe' : 'bash');
+        
+    final List<String> args = Platform.isAndroid
+        ? [
+            runtime.prootCommand,
+            runtime.appDirectory,
+            dir,
+          ]
+        : Platform.isWindows
+        ? []
+        : ['-i'];
+
+    if (!Platform.isAndroid && !Platform.isWindows) {
+      env['TERM'] = 'xterm-256color';
+      env['COLORTERM'] = 'truecolor';
+      env['LANG'] = env['LANG'] ?? 'C.UTF-8';
+      env['HOME'] = env['HOME'] ?? Platform.environment['HOME'] ?? '/root';
+      env['PWD'] = dir;
+    }
+
+    try {
+      _agentPty = Pty.start(
+        shell,
+        arguments: args,
+        environment: env,
+        workingDirectory: Platform.isAndroid ? runtime.appDirectory : dir,
+      );
+
+      final terminal = state.aiXtermTerminal;
+      if (terminal != null) {
+        terminal.eraseScrollbackOnly();
+        terminal.eraseDisplay();
+        
+        terminal.onOutput = (data) {
+          _agentPty?.write(Uint8List.fromList(utf8.encode(data)));
+        };
+        terminal.onResize = (cols, rows, int pixelWidth, int pixelHeight) {
+          _agentPty?.resize(rows, cols);
+        };
+        
+        const decoder = Utf8Decoder(allowMalformed: true);
+        _agentPtySubscription = _agentPty!.output.listen(
+          (data) {
+            terminal.write(decoder.convert(data));
+          },
+          onDone: () {
+            stopAgent();
+            terminal.write('\r\n\x1b[1;31m[Agent process exited]\x1b[0m\r\n');
+          },
+          onError: (e) {
+            terminal.write('\r\n\x1b[1;31m[Error: $e]\r\n');
+          },
+        );
+        
+        state = state.copyWith(isAgentRunning: true);
+        
+        // Give it a brief moment to warm up, then execute command
+        await Future.delayed(const Duration(milliseconds: 200));
+        _agentPty?.write(Uint8List.fromList(utf8.encode('$command\n')));
+      }
+    } catch (e) {
+      debugPrint('Failed to start agent command process: $e');
+    }
+  }
+
+  void stopAgent() {
+    if (_agentPty == null && _agentPtySubscription == null) return;
+    debugPrint('Stopping agent');
+    _agentPtySubscription?.cancel();
+    _agentPtySubscription = null;
+    try {
+      _agentPty?.kill();
+    } catch (_) {}
+    _agentPty = null;
+    state = state.copyWith(isAgentRunning: false);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _workspaceWatcherSubscription?.cancel();
+    _diffTimer?.cancel();
+    for (final timer in _autoSaveTimers.values) {
+      timer.cancel();
+    }
+    _agentPtySubscription?.cancel();
+    try {
+      _agentPty?.kill();
+    } catch (_) {}
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      for (int i = 0; i < this.state.openFiles.length; i++) {
+        if (this.state.openFiles[i].isModified) {
+          saveFile(i, isAutoSave: true);
+        }
+      }
+    }
+  }
+
+  Future<void> goToDefinition() async {
+    final path = state.activeFilePath;
+    if (path == null) return;
+    
+    final file = state.openFiles[state.activeTabIndex];
+    final cursor = file.controller.selection.extent;
+    
+    final locations = await _lspService.getDefinition(path, cursor.index, cursor.offset);
+    if (locations.isNotEmpty) {
+      final loc = locations.first;
+      final targetUri = Uri.parse(loc.uri);
+      if (targetUri.scheme == 'file') {
+        final targetPath = targetUri.toFilePath();
+        await openFile(targetPath, line: loc.range.start.line, column: loc.range.start.character);
+      }
+    }
+  }
+
+  Future<Hover?> getHover() async {
+    final path = state.activeFilePath;
+    if (path == null) return null;
+    
+    final file = state.openFiles[state.activeTabIndex];
+    final cursor = file.controller.selection.extent;
+    
+    return await _lspService.getHover(path, cursor.index, cursor.offset);
+  }
+
+  Future<List<Location>> getReferences() async {
+    final path = state.activeFilePath;
+    if (path == null) return [];
+    
+    final file = state.openFiles[state.activeTabIndex];
+    final cursor = file.controller.selection.extent;
+    
+    return await _lspService.getReferences(path, cursor.index, cursor.offset);
+  }
+
+  Future<void> rename(String newName) async {
+    final path = state.activeFilePath;
+    if (path == null) return;
+    
+    final file = state.openFiles[state.activeTabIndex];
+    final cursor = file.controller.selection.extent;
+    
+    await _lspService.rename(path, cursor.index, cursor.offset, newName);
+  }
+
+  Future<void> formatActiveFile() async {
+    final path = state.activeFilePath;
+    if (path == null) return;
+    final activeIdx = state.openFiles.indexWhere((f) => f.path == path);
+    if (activeIdx == -1) return;
+    await _lspService.onFileChanged(path, state.openFiles[activeIdx].controller.text);
+    final edits = await _lspService.format(path);
+    if (edits.isEmpty) return;
+
+    final jsonEdits = edits.map((e) => {
+      'range': {
+        'start': {
+          'line': e.range.start.line,
+          'character': e.range.start.character,
+        },
+        'end': {
+          'line': e.range.end.line,
+          'character': e.range.end.character,
+        }
+      },
+      'newText': e.newText,
+    }).toList();
+
+    applyLSPEdits(path, jsonEdits);
+  }
+
+  void applyLSPEdits(String filePath, List<dynamic> edits) {
+    final index = state.openFiles.indexWhere((f) => f.path == filePath);
+    if (index == -1) return;
+
+    final file = state.openFiles[index];
+    final controller = file.controller;
+
+    // Sort edits by range (reverse order to not mess up positions)
+    final sortedEdits = List.from(edits);
+    sortedEdits.sort((a, b) {
+      final aStart = a['range']['start'] as Map;
+      final bStart = b['range']['start'] as Map;
+      final aLine = aStart['line'] as int;
+      final bLine = bStart['line'] as int;
+      if (aLine != bLine) return bLine.compareTo(aLine);
+      return (bStart['character'] as int).compareTo(aStart['character'] as int);
+    });
+
+    // Normalize CRLF so line/character offsets match LSP lines
+    String currentText = controller.text.replaceAll('\r\n', '\n');
+
+    for (final edit in sortedEdits) {
+      try {
+        final range = edit['range'] as Map<String, dynamic>;
+        final start = range['start'] as Map<String, dynamic>;
+        final end = range['end'] as Map<String, dynamic>;
+        final newText = (edit['newText'] as String).replaceAll('\r\n', '\n');
+
+        final startLine = start['line'] as int;
+        final startChar = start['character'] as int;
+        final endLine = end['line'] as int;
+        final endChar = end['character'] as int;
+
+        final lines = currentText.split('\n');
+        if (startLine < 0 || endLine < 0 || startLine >= lines.length || endLine >= lines.length) continue;
+        if (startChar > lines[startLine].length || endChar > lines[endLine].length) continue;
+
+        int startOffset = 0;
+        for (int i = 0; i < startLine; i++) {
+          startOffset += lines[i].length + 1;
+        }
+        startOffset += startChar;
+
+        int endOffset = 0;
+        for (int i = 0; i < endLine; i++) {
+          endOffset += lines[i].length + 1;
+        }
+        endOffset += endChar;
+
+        if (startOffset >= 0 && endOffset >= startOffset && endOffset <= currentText.length) {
+          currentText = currentText.replaceRange(startOffset, endOffset, newText);
+        }
+      } catch (e) {
+        debugPrint('Error applying LSP edit: $e');
+      }
+    }
+
+    if (currentText == controller.text) return;
+
+    // Update controller without triggering recursive auto-save/LSP loops
+    _isReloadingFromDisk = true;
+    try {
+      controller.text = currentText;
+      _lastCodeLines[filePath] = controller.codeLines;
+    } finally {
+      _isReloadingFromDisk = false;
+    }
+
+    _lspService.onFileChanged(filePath, currentText).catchError((_) {});
+    _handleContentChange(filePath, triggerAutoSave: false);
+  }
+
+
+
+  void applyHunkAction(String filePath, int hunkIndex, bool keep) {
+    final index = state.openFiles.indexWhere((f) => f.path == filePath);
+    if (index == -1) return;
+    
+    final file = state.openFiles[index];
+    final original = file.originalContent;
+    final current = file.controller.text;
+    
+    final dmp = DiffMatchPatch();
+    final diffs = dmp.diff(original, current);
+    dmp.diffCleanupSemantic(diffs);
+    
+    // Filter non-equal diff blocks which correspond to hunks
+    final editDiffIndices = <int>[];
+    for (int i = 0; i < diffs.length; i++) {
+      if (diffs[i].operation != DIFF_EQUAL) {
+        editDiffIndices.add(i);
+      }
+    }
+    
+    if (hunkIndex < 0 || hunkIndex >= editDiffIndices.length) return;
+    
+    final targetDiffIndex = editDiffIndices[hunkIndex];
+    final targetDiff = diffs[targetDiffIndex];
+    
+    if (keep) {
+      // Keep the change:
+      if (targetDiff.operation == DIFF_INSERT) {
+        // Change INSERT to EQUAL so it becomes part of originalContent
+        diffs[targetDiffIndex] = Diff(DIFF_EQUAL, targetDiff.text);
+      } else if (targetDiff.operation == DIFF_DELETE) {
+        // Remove the DELETE block completely so it is removed from originalContent
+        diffs.removeAt(targetDiffIndex);
+      }
+    } else {
+      // Reject the change (Undo):
+      if (targetDiff.operation == DIFF_INSERT) {
+        // Remove the INSERT block completely so it is removed from currentText
+        diffs.removeAt(targetDiffIndex);
+      } else if (targetDiff.operation == DIFF_DELETE) {
+        // Change DELETE to EQUAL so it is restored in currentText
+        diffs[targetDiffIndex] = Diff(DIFF_EQUAL, targetDiff.text);
+      }
+    }
+    
+    // Rebuild original and current text from the modified diffs list
+    final newOriginal = StringBuffer();
+    final newCurrent = StringBuffer();
+    
+    for (final d in diffs) {
+      if (d.operation == DIFF_EQUAL) {
+        newOriginal.write(d.text);
+        newCurrent.write(d.text);
+      } else if (d.operation == DIFF_INSERT) {
+        newCurrent.write(d.text);
+      } else if (d.operation == DIFF_DELETE) {
+        newOriginal.write(d.text);
+      }
+    }
+    
+    final updatedOriginal = newOriginal.toString();
+    final updatedCurrent = newCurrent.toString();
+    
+    // Update the controller and state
+    file.controller.text = updatedCurrent;
+    final newOpenFiles = List<EditorFile>.from(state.openFiles);
+    newOpenFiles[index] = file.copyWith(
+      originalContent: updatedOriginal,
+    );
+    state = state.copyWith(openFiles: newOpenFiles);
+    
+    _updateDiff(filePath);
+    _handleContentChange(filePath);
+  }
+}

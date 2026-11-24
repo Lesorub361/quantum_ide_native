@@ -1,0 +1,885 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:quantum_ide/models/adb_device.dart';
+import 'runtime_service.dart';
+
+class AdbDeviceState {
+  final bool isChecking;
+  final bool isUsbHostSupported;
+  final List<Map<String, dynamic>> rawUsbDevices;
+  final List<AdbDevice> devices;
+  final AdbDevice? selectedDevice;
+  final String? lastError;
+  final DateTime? lastChecked;
+
+  const AdbDeviceState({
+    this.isChecking = false,
+    this.isUsbHostSupported = true,
+    this.rawUsbDevices = const [],
+    this.devices = const [],
+    this.selectedDevice,
+    this.lastError,
+    this.lastChecked,
+  });
+
+  bool get hasConnectedDevice => selectedDevice != null && selectedDevice!.isOnline;
+  bool get hasAnyDevices => devices.isNotEmpty;
+
+  AdbDeviceState copyWith({
+    bool? isChecking,
+    bool? isUsbHostSupported,
+    List<Map<String, dynamic>>? rawUsbDevices,
+    List<AdbDevice>? devices,
+    AdbDevice? selectedDevice,
+    bool clearSelectedDevice = false,
+    String? lastError,
+    DateTime? lastChecked,
+  }) {
+    return AdbDeviceState(
+      isChecking: isChecking ?? this.isChecking,
+      isUsbHostSupported: isUsbHostSupported ?? this.isUsbHostSupported,
+      rawUsbDevices: rawUsbDevices ?? this.rawUsbDevices,
+      devices: devices ?? this.devices,
+      selectedDevice: clearSelectedDevice ? null : (selectedDevice ?? this.selectedDevice),
+      lastError: lastError,
+      lastChecked: lastChecked ?? this.lastChecked,
+    );
+  }
+}
+
+class AdbDeviceService extends StateNotifier<AdbDeviceState> {
+  final Ref _ref;
+  static const MethodChannel _nativeChannel = MethodChannel('com.example.quantum_ide/native');
+  Timer? _pollingTimer;
+  bool _isRefreshing = false;
+  bool _hasInitialServerStarted = false;
+
+  AdbDeviceService(this._ref) : super(const AdbDeviceState()) {
+    init();
+  }
+
+  Future<void> init() async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      runtime.runCommand(
+        'if [ -f /usr/bin/adb ]; then '
+        'mkdir -p /root/android-sdk/platform-tools && '
+        'cp -f /usr/bin/adb /root/android-sdk/platform-tools/adb && '
+        'chmod +x /root/android-sdk/platform-tools/adb; '
+        'fi 2>/dev/null || true'
+      );
+    } catch (_) {}
+    await checkUsbHostSupport();
+    await refreshDevices();
+  }
+
+  void startPolling({Duration interval = const Duration(seconds: 10)}) {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(interval, (_) => refreshDevices(silent: true));
+  }
+
+  void stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  @override
+  void dispose() {
+    stopPolling();
+    super.dispose();
+  }
+
+  /// Checks whether this device supports USB Host mode (OTG) and lists attached USB devices
+  Future<void> checkUsbHostSupport({bool autoRequestPermission = true}) async {
+    if (!Platform.isAndroid) {
+      final usbDir = Directory('/dev/bus/usb');
+      final supported = await usbDir.exists();
+      state = state.copyWith(isUsbHostSupported: supported);
+      return;
+    }
+
+    try {
+      final bool? isSupported = await _nativeChannel.invokeMethod<bool>('isUsbHostSupported');
+      final List<dynamic>? rawDevices = await _nativeChannel.invokeMethod<List<dynamic>>(
+        'getConnectedUsbDevices',
+        {'autoRequestPermission': autoRequestPermission},
+      );
+
+      final List<Map<String, dynamic>> parsedList = [];
+      if (rawDevices != null) {
+        for (final item in rawDevices) {
+          if (item is Map) {
+            parsedList.add(Map<String, dynamic>.from(item));
+          }
+        }
+      }
+
+      state = state.copyWith(
+        isUsbHostSupported: isSupported ?? true,
+        rawUsbDevices: parsedList,
+      );
+    } catch (e) {
+      debugPrint('[AdbDeviceService] Error checking USB host: $e');
+    }
+  }
+
+  /// Explicitly requests USB OTG permission and starts the native USB-to-ADB bridge
+  Future<String> connectUsbOtg() async {
+    if (!Platform.isAndroid) {
+      await refreshDevices();
+      return 'Проверка USB завершена';
+    }
+    try {
+      final List<dynamic>? rawDevices = await _nativeChannel.invokeMethod<List<dynamic>>('connectUsbOtg');
+      final List<Map<String, dynamic>> parsedList = [];
+      if (rawDevices != null) {
+        for (final item in rawDevices) {
+          if (item is Map) {
+            parsedList.add(Map<String, dynamic>.from(item));
+          }
+        }
+      }
+      state = state.copyWith(rawUsbDevices: parsedList);
+      await refreshDevices();
+
+      if (parsedList.isEmpty) {
+        return 'Физические USB-устройства не обнаружены. Проверьте кабель Type-C и включите «Подключение OTG» в настройках.';
+      }
+      final adbCapable = parsedList.where((d) => d['hasAdbInterface'] == true).toList();
+      if (adbCapable.isEmpty) {
+        return 'Телефон подключен по USB, но «Отладка по USB» на втором телефоне выключена (режим только зарядки/MTP).';
+      }
+      final noPerm = adbCapable.where((d) => d['hasPermission'] != true).toList();
+      if (noPerm.isNotEmpty) {
+        return 'Подтвердите системное окно Android «Разрешить доступ к USB-устройству» и нажмите «Подключить USB» ещё раз.';
+      }
+      return 'USB-OTG мост активен! Подтвердите отладку (RSA-ключ) на экране второго телефона.';
+    } catch (e) {
+      return 'Ошибка USB OTG: $e';
+    }
+  }
+
+  /// Refreshes ADB device list (`adb devices -l`)
+  Future<void> refreshDevices({bool silent = false}) async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+
+    if (!silent) {
+      state = state.copyWith(isChecking: true, lastError: null);
+    }
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await checkUsbHostSupport(autoRequestPermission: !silent);
+
+      // Start ADB server once on initial run or manual explicit refresh
+      if (!_hasInitialServerStarted || !silent) {
+        _hasInitialServerStarted = true;
+        await runtime.runCommand('timeout 4 adb start-server 2>/dev/null || true');
+      }
+
+      var output = await runtime.runCommand('timeout 4 adb devices -l 2>/dev/null || true').catchError((e) => '');
+
+      // Connect USB-OTG bridges that are missing or stuck in offline state
+      bool connectedNewBridge = false;
+      for (final usbDev in state.rawUsbDevices) {
+        final bridgeActive = usbDev['bridgeActive'] == true;
+        final bridgeAddr = (usbDev['bridgeAddress'] ?? '').toString().trim();
+        if (!bridgeActive || bridgeAddr.isEmpty) continue;
+        final isMissing = !output.contains(bridgeAddr);
+        final isStuckOffline = RegExp('(^|\\n)${RegExp.escape(bridgeAddr)}\\s+offline').hasMatch(output);
+        if (isMissing) {
+          await runtime.runCommand('timeout 3 adb connect $bridgeAddr 2>/dev/null || true');
+          connectedNewBridge = true;
+        } else if (isStuckOffline) {
+          await runtime.runCommand(
+            'adb disconnect $bridgeAddr 2>/dev/null; sleep 0.2; timeout 3 adb connect $bridgeAddr 2>/dev/null || true',
+          );
+          connectedNewBridge = true;
+        }
+      }
+      if (connectedNewBridge) {
+        output = await runtime.runCommand('timeout 4 adb devices -l 2>/dev/null || true').catchError((e) => '');
+      }
+
+      // If silent background poll timed out while an active USB bridge exists, preserve current devices
+      if (silent && output.trim().isEmpty && state.devices.isNotEmpty && state.rawUsbDevices.any((u) => u['bridgeActive'] == true)) {
+        _isRefreshing = false;
+        return;
+      }
+
+      final List<AdbDevice> parsed = [];
+
+      final lines = output.split('\n');
+      for (final line in lines) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty ||
+            trimmed.startsWith('List of devices') ||
+            trimmed.startsWith('* daemon')) {
+          continue;
+        }
+
+        var device = AdbDevice.fromAdbLine(trimmed);
+        if (device.id.isNotEmpty) {
+          // Enrich USB-bridged device name from UsbManager metadata if model is not yet reported
+          if (device.model.isEmpty) {
+            final matchingUsb = state.rawUsbDevices.where((u) => u['bridgeAddress'] == device.id).toList();
+            if (matchingUsb.isNotEmpty) {
+              final mfg = (matchingUsb.first['manufacturer'] ?? '').toString().trim();
+              final prod = (matchingUsb.first['product'] ?? '').toString().trim();
+              final combined = '$mfg $prod'.trim();
+              if (combined.isNotEmpty) {
+                device = device.copyWith(model: combined);
+              }
+            }
+          }
+          parsed.add(device);
+        }
+      }
+
+      // Check battery & android version for online devices in background
+      final enriched = <AdbDevice>[];
+      for (final dev in parsed) {
+        if (dev.isOnline) {
+          try {
+            final versionOut = await runtime.runCommand('timeout 2 adb -s ${dev.id} shell getprop ro.build.version.release 2>/dev/null || true');
+            final cleanVersion = versionOut.trim();
+            final modelOut = dev.model.isEmpty
+                ? (await runtime.runCommand('timeout 2 adb -s ${dev.id} shell getprop ro.product.model 2>/dev/null || true')).trim()
+                : dev.model;
+            final devWithVersion = dev.copyWith(
+              model: modelOut.isNotEmpty ? modelOut : dev.model,
+              androidVersion: cleanVersion.isNotEmpty ? 'Android $cleanVersion' : null,
+            );
+            enriched.add(devWithVersion);
+          } catch (_) {
+            enriched.add(dev);
+          }
+        } else {
+          enriched.add(dev);
+        }
+      }
+
+      AdbDevice? newSelected = state.selectedDevice;
+      if (enriched.isNotEmpty) {
+        // Keep current selected if still present, otherwise prefer USB-bridged phone first
+        final stillExists = enriched.any((d) => d.id == newSelected?.id);
+        if (!stillExists) {
+          newSelected = enriched.firstWhere(
+            (d) => d.isUsbBridged && d.isOnline,
+            orElse: () => enriched.firstWhere(
+              (d) => d.isUsbBridged,
+              orElse: () => enriched.firstWhere(
+                (d) => d.isOnline,
+                orElse: () => enriched.first,
+              ),
+            ),
+          );
+        } else {
+          newSelected = enriched.firstWhere((d) => d.id == newSelected?.id);
+        }
+      } else {
+        newSelected = null;
+      }
+
+      state = state.copyWith(
+        isChecking: false,
+        devices: enriched,
+        selectedDevice: newSelected,
+        clearSelectedDevice: enriched.isEmpty,
+        lastChecked: DateTime.now(),
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isChecking: false,
+        lastError: e.toString(),
+        lastChecked: DateTime.now(),
+      );
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  void selectDevice(AdbDevice? device) {
+    state = state.copyWith(selectedDevice: device, clearSelectedDevice: device == null);
+  }
+
+  String _formatAdbError(String raw) {
+    var clean = raw.replaceFirst(RegExp(r'^Exception:\s*'), '');
+    clean = clean.replaceFirst(RegExp(r'^Command failed \(exit code \d+\):\s*'), '');
+    clean = clean.trim();
+
+    if (clean.contains('protocol fault')) {
+      return 'Сбой протокола ADB (protocol fault):\n'
+          '1. Отключите VPN на телефоне (VPN на Android перехватывает локальный Wi-Fi трафик и ломает ADB сокеты).\n'
+          '2. Для Android 11+ нужно сначала выполнить «2. Сопряжение по коду» (с кодом из 6 цифр).\n'
+          '3. ADB сервер был автоматически перезапущен для восстановления.';
+    }
+    if (clean.contains('failed to connect') ||
+        clean.contains('Connection refused') ||
+        clean.contains('timed out') ||
+        clean.contains('Connection reset')) {
+      return 'Не удалось подключиться к $clean:\n'
+          '1. Отключите VPN (VPN направляет трафик на удалённый сервер вместо локальной сети Wi-Fi).\n'
+          '2. Убедитесь, что оба телефона в одной Wi-Fi сети (или раздайте Wi-Fi с одного телефона на другой).\n'
+          '3. Проверьте, что на втором телефоне включен экран и активна «Беспроводная отладка» (порт мог измениться).';
+    }
+    if (clean.contains('unknown command pair') || clean.contains('unknown command')) {
+      return 'В системе установлен устаревший ADB (Ubuntu 20.04) без команды "pair" (Android 11+).\n'
+          'Обновите ADB кнопкой ниже или выполните команду обновления в терминале.';
+    }
+    return clean;
+  }
+
+  /// Upgrades ADB binary in proot container to modern static ARM64 (Platform-Tools 35.0.2)
+  Future<String> upgradeAdbBinary() async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand(
+        'mkdir -p /tmp/adb_up && '
+        '(curl -k -fL --retry 2 -o /tmp/adb_up/tools.zip "https://github.com/lzhiyong/android-sdk-tools/releases/download/35.0.2/android-sdk-tools-static-aarch64.zip" || '
+        'wget --no-check-certificate -qO /tmp/adb_up/tools.zip "https://github.com/lzhiyong/android-sdk-tools/releases/download/35.0.2/android-sdk-tools-static-aarch64.zip") && '
+        'unzip -qo /tmp/adb_up/tools.zip "platform-tools/adb" -d /tmp/adb_up && '
+        'cp -f /tmp/adb_up/platform-tools/adb /usr/bin/adb && '
+        'chmod +x /usr/bin/adb && '
+        'rm -rf /tmp/adb_up && '
+        'adb kill-server 2>/dev/null; sleep 0.5; adb start-server 2>/dev/null || true'
+      );
+      final ver = await runtime.runCommand('adb version 2>&1 || true');
+      return '✅ ADB успешно обновлён до современной версии:\n${ver.trim()}';
+    } catch (e) {
+      return 'Ошибка обновления ADB: $e';
+    }
+  }
+
+  String _stripAdbDaemonLines(String raw) {
+    return raw
+        .split('\n')
+        .where((l) => !l.trim().startsWith('* daemon '))
+        .join('\n')
+        .trim();
+  }
+
+  /// Connect to device via Wi-Fi ADB (e.g. `192.168.1.100:5555`)
+  Future<String> connectWifi(String ipAndPort) async {
+    final clean = ipAndPort.trim();
+    if (clean.isEmpty) return 'Укажите IP и порт (например 192.168.1.15:5555)';
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand('timeout 5 adb start-server >/dev/null 2>&1 || true');
+      var res = await runtime.runCommand('timeout 10 adb connect $clean 2>&1 || true');
+      if (res.contains('command not found') || res.contains('adb: not found')) {
+        await fixAdbEnvironment();
+        res = await runtime.runCommand('timeout 10 adb connect $clean 2>&1 || true');
+      }
+      final cleanRes = _stripAdbDaemonLines(res);
+      if (cleanRes.contains('connected to') || cleanRes.contains('already connected')) {
+        await refreshDevices();
+        return '✅ $cleanRes';
+      }
+
+      // Auto-heal on protocol fault, broken server, or silent timeout
+      if (cleanRes.contains('protocol fault') ||
+          cleanRes.contains('cannot connect') ||
+          cleanRes.contains('failed') ||
+          cleanRes.isEmpty) {
+        await runtime.runCommand('adb kill-server 2>/dev/null; sleep 0.5; timeout 5 adb start-server 2>/dev/null || true');
+        final retry = _stripAdbDaemonLines(
+          await runtime.runCommand('timeout 10 adb connect $clean 2>&1 || true'),
+        );
+        await refreshDevices();
+        if (retry.contains('connected to') || retry.contains('already connected')) {
+          return '✅ $retry';
+        }
+        final msg = _formatAdbError(retry.isNotEmpty ? retry : cleanRes);
+        return msg.isNotEmpty
+            ? msg
+            : 'Таймаут подключения к $clean. Проверьте IP, основной порт отладки по Wi-Fi и отсутствие изоляции клиентов (AP Isolation) в Wi-Fi сети.';
+      }
+      await refreshDevices();
+      final msg = _formatAdbError(cleanRes);
+      return msg.isNotEmpty ? msg : 'Ответ ADB: $cleanRes';
+    } catch (e) {
+      try {
+        await runtime.runCommand('adb kill-server 2>/dev/null; sleep 0.5; timeout 5 adb start-server 2>/dev/null || true');
+      } catch (_) {}
+      return _formatAdbError(e.toString());
+    }
+  }
+
+  /// Pair device via Wi-Fi ADB with pairing code (Android 11+)
+  Future<String> pairWifi(String ipAndPort, String pairingCode) async {
+    final cleanIp = ipAndPort.trim();
+    final cleanCode = pairingCode.trim();
+    if (cleanIp.isEmpty || cleanCode.isEmpty) {
+      return 'Укажите IP:порт и код сопряжения (6 цифр)';
+    }
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand('timeout 5 adb start-server >/dev/null 2>&1 || true');
+      var res = await runtime.runCommand('timeout 12 adb pair $cleanIp $cleanCode 2>&1 || true');
+      if (res.contains('command not found') || res.contains('adb: not found')) {
+        await fixAdbEnvironment();
+        res = await runtime.runCommand('timeout 12 adb pair $cleanIp $cleanCode 2>&1 || true');
+      }
+      final cleanRes = _stripAdbDaemonLines(res);
+      if (cleanRes.contains('Successfully paired') || cleanRes.contains('paired to')) {
+        await refreshDevices();
+        return '✅ Устройство успешно сопряжено! Теперь переключите режим на «Прямое подключение» и введите основной порт из «Отладки по Wi-Fi».';
+      }
+
+      // If adb is too old and lacks 'pair' command (Ubuntu 20.04 default), auto-upgrade adb
+      if (cleanRes.contains('unknown command pair') || cleanRes.contains('unknown command')) {
+        try {
+          await upgradeAdbBinary();
+          final retry = _stripAdbDaemonLines(
+            await runtime.runCommand('timeout 12 adb pair $cleanIp $cleanCode 2>&1 || true'),
+          );
+          await refreshDevices();
+          if (retry.contains('Successfully paired') || retry.contains('paired to')) {
+            return '✅ ADB обновлён и устройство успешно сопряжено! Теперь переключите режим на «Прямое подключение» и введите основной порт из «Отладки по Wi-Fi».';
+          }
+          return _formatAdbError(retry.isNotEmpty ? retry : cleanRes);
+        } catch (_) {}
+      }
+
+      if (cleanRes.contains('protocol fault') || cleanRes.contains('failed') || cleanRes.isEmpty) {
+        await runtime.runCommand('adb kill-server 2>/dev/null; sleep 0.5; timeout 5 adb start-server 2>/dev/null || true');
+        final retry = _stripAdbDaemonLines(
+          await runtime.runCommand('timeout 12 adb pair $cleanIp $cleanCode 2>&1 || true'),
+        );
+        await refreshDevices();
+        if (retry.contains('Successfully paired') || retry.contains('paired to')) {
+          return '✅ Устройство успешно сопряжено! Теперь переключите режим на «Прямое подключение» и введите основной порт из «Отладки по Wi-Fi».';
+        }
+        final msg = _formatAdbError(retry.isNotEmpty ? retry : cleanRes);
+        return msg.isNotEmpty
+            ? msg
+            : 'Нет ответа от $cleanIp при сопряжении. Убедитесь, что окно с 6-значным кодом открыто на экране телефона, а в Wi-Fi сети нет изоляции клиентов (AP Isolation).';
+      }
+      await refreshDevices();
+      final msg = _formatAdbError(cleanRes);
+      return msg.isNotEmpty ? msg : 'Ответ ADB: $cleanRes';
+    } catch (e) {
+      try {
+        await runtime.runCommand('adb kill-server 2>/dev/null; sleep 0.5; timeout 5 adb start-server 2>/dev/null || true');
+      } catch (_) {}
+      return _formatAdbError(e.toString());
+    }
+  }
+
+  /// Disconnect Wi-Fi device
+  Future<String> disconnectWifi(String target) async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      final res = await runtime.runCommand('adb disconnect $target 2>&1 || true');
+      await refreshDevices();
+      return res.trim();
+    } catch (e) {
+      return 'Ошибка: $e';
+    }
+  }
+
+  /// Reconnects offline or stalled device by kicking transport and re-connecting
+  Future<String> reconnectDevice(String deviceId) async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand('adb reconnect offline 2>/dev/null; adb disconnect $deviceId 2>/dev/null; sleep 0.4; adb connect $deviceId 2>&1 || true');
+      await refreshDevices();
+      return 'Сброс и повторное подключение $deviceId выполнено';
+    } catch (e) {
+      return 'Ошибка переподключения: $e';
+    }
+  }
+
+  /// Restarts ADB server
+  Future<String> restartServer() async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      final res = await runtime.runCommand('adb kill-server 2>/dev/null; sleep 0.5; adb start-server 2>&1 || true');
+      await refreshDevices();
+      return res.trim().isNotEmpty ? res.trim() : 'ADB сервер успешно перезапущен';
+    } catch (e) {
+      return 'Ошибка перезапуска: $e';
+    }
+  }
+
+  /// Installs APK to selected device and optionally starts the main activity
+  Future<String> installAndRun({
+    required String apkPath,
+    String? packageName,
+    String? activityName,
+    String? deviceId,
+  }) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) {
+      return 'Целевое устройство не выбрано или не подключено';
+    }
+
+    final resolvedPkg = (packageName != null && packageName.isNotEmpty)
+        ? packageName
+        : await detectPackageNameForApk(apkPath);
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    final cmd = StringBuffer('adb -s $targetId install -r "$apkPath"');
+    if (resolvedPkg != null && resolvedPkg.isNotEmpty) {
+      if (activityName != null && activityName.isNotEmpty) {
+        cmd.write(' && adb -s $targetId shell am start -n "$resolvedPkg/$activityName"');
+      } else {
+        cmd.write(' && adb -s $targetId shell monkey -p "$resolvedPkg" -c android.intent.category.LAUNCHER 1');
+      }
+    }
+
+    try {
+      final output = await runtime.runCommand(cmd.toString());
+      if (output.contains('INSTALL_FAILED_USER_RESTRICTED')) {
+        return 'Ошибка Xiaomi: включите «Установка через USB» в «Настройках для разработчиков» на подключаемом телефоне.';
+      }
+      return output.trim();
+    } catch (e) {
+      if (e.toString().contains('INSTALL_FAILED_USER_RESTRICTED')) {
+        return 'Ошибка Xiaomi: включите «Установка через USB» в «Настройках для разработчиков» на подключаемом телефоне.';
+      }
+      return 'Ошибка установки: $e';
+    }
+  }
+
+  /// Installs any compiled APK directly onto this phone (host device) via Android PackageInstaller
+  Future<String> installApkOnHostPhone(String prootApkPath, {bool launchAfterInstall = true}) async {
+    if (!Platform.isAndroid) {
+      return 'Локальная установка APK поддерживается только на Android';
+    }
+    try {
+      final filesDir = await _nativeChannel.invokeMethod<String>('getFilesDir') ??
+          '/data/user/0/com.example.quantum_ide/files';
+      String hostPath = prootApkPath;
+      if (prootApkPath.startsWith('/root/projects/external/')) {
+        hostPath = prootApkPath.replaceFirst('/root/projects/external/', '/storage/emulated/0/QuantumIDE/');
+      } else if (prootApkPath.startsWith('/sdcard/')) {
+        hostPath = prootApkPath.replaceFirst('/sdcard/', '/storage/emulated/0/');
+      } else if (prootApkPath.startsWith('/root/projects/')) {
+        hostPath = prootApkPath.replaceFirst('/root/projects/', '$filesDir/projects/');
+      } else if (!prootApkPath.startsWith('/data/') && !prootApkPath.startsWith('/storage/')) {
+        hostPath = '$filesDir/rootfs/ubuntu$prootApkPath';
+      }
+
+      await _nativeChannel.invokeMethod('installApk', {
+        'apkPath': hostPath,
+        'launchAfterInstall': launchAfterInstall,
+      });
+      return 'Запущен системный установщик Android для $prootApkPath';
+    } catch (e) {
+      return 'Ошибка локальной установки APK: $e';
+    }
+  }
+
+  /// Finds all compiled .apk files in the current workspace and across `/root/projects/`
+  Future<List<String>> findCompiledApks({String? workspacePath}) async {
+    final results = <String>[];
+    final seen = <String>{};
+
+    void addIfExists(String path) {
+      if (seen.contains(path)) return;
+      final f = File(path);
+      if (f.existsSync() && f.lengthSync() > 0) {
+        seen.add(path);
+        results.add(path);
+      }
+    }
+
+    void scanProjectDir(String projectDir) {
+      addIfExists('$projectDir/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk');
+      addIfExists('$projectDir/build/app/outputs/flutter-apk/app-release.apk');
+      addIfExists('$projectDir/build/app/outputs/flutter-apk/app-debug.apk');
+      final flutterApkDir = Directory('$projectDir/build/app/outputs/flutter-apk');
+      if (flutterApkDir.existsSync()) {
+        try {
+          for (final entity in flutterApkDir.listSync()) {
+            if (entity is File && entity.path.endsWith('.apk')) {
+              addIfExists(entity.path);
+            }
+          }
+        } catch (_) {}
+      }
+      final gradleApkDir = Directory('$projectDir/app/build/outputs/apk');
+      if (gradleApkDir.existsSync()) {
+        try {
+          for (final entity in gradleApkDir.listSync(recursive: true)) {
+            if (entity is File && entity.path.endsWith('.apk')) {
+              addIfExists(entity.path);
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (workspacePath != null && workspacePath.isNotEmpty) {
+      scanProjectDir(workspacePath);
+    }
+
+    final projectsRoot = Directory('/root/projects');
+    if (projectsRoot.existsSync()) {
+      try {
+        for (final dir in projectsRoot.listSync()) {
+          if (dir is Directory && !dir.path.endsWith('/external')) {
+            scanProjectDir(dir.path);
+          }
+        }
+      } catch (_) {}
+    }
+    return results;
+  }
+
+  /// Automatically detects Android package name (applicationId) from a project or APK path
+  Future<String?> detectPackageNameForApk(String apkOrProjectPath) async {
+    String projectDir = apkOrProjectPath;
+    final buildIdx = apkOrProjectPath.indexOf('/build/');
+    if (buildIdx > 0) {
+      projectDir = apkOrProjectPath.substring(0, buildIdx);
+    } else {
+      final appBuildIdx = apkOrProjectPath.indexOf('/app/build/');
+      if (appBuildIdx > 0) {
+        projectDir = apkOrProjectPath.substring(0, appBuildIdx);
+      }
+    }
+
+    final candidates = [
+      '$projectDir/android/app/build.gradle.kts',
+      '$projectDir/android/app/build.gradle',
+      '$projectDir/app/build.gradle.kts',
+      '$projectDir/app/build.gradle',
+    ];
+
+    for (final path in candidates) {
+      final f = File(path);
+      if (f.existsSync()) {
+        try {
+          final content = await f.readAsString();
+          final match = RegExp(r'''applicationId\s*=?\s*["']([a-zA-Z0-9_.]+)["']''').firstMatch(content);
+          if (match != null) return match.group(1);
+        } catch (_) {}
+      }
+    }
+
+    final manifests = [
+      '$projectDir/android/app/src/main/AndroidManifest.xml',
+      '$projectDir/app/src/main/AndroidManifest.xml',
+    ];
+    for (final path in manifests) {
+      final f = File(path);
+      if (f.existsSync()) {
+        try {
+          final content = await f.readAsString();
+          final match = RegExp(r'''package\s*=\s*["']([a-zA-Z0-9_.]+)["']''').firstMatch(content);
+          if (match != null) return match.group(1);
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  /// Takes screenshot from target device and copies it to local workspace
+  Future<String> takeScreenshot({String? localDestPath, String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) throw Exception('Целевой телефон не подключен');
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final dest = localDestPath ?? '/root/projects/quantum_ide/scratch/screenshot_$timestamp.png';
+    await File(dest).parent.create(recursive: true);
+
+    final cmd = 'adb -s $targetId shell screencap -p /sdcard/quantum_screen.png && adb -s $targetId pull /sdcard/quantum_screen.png "$dest" && adb -s $targetId shell rm -f /sdcard/quantum_screen.png';
+    await runtime.runCommand(cmd);
+
+    if (!await File(dest).exists()) {
+      throw Exception('Не удалось сохранить скриншот с устройства');
+    }
+    return dest;
+  }
+
+  /// Dumps UIAutomator XML from target device
+  Future<String> dumpUiHierarchy({String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) throw Exception('Целевой телефон не подключен');
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    final localPath = '/tmp/quantum_window_dump_${DateTime.now().millisecondsSinceEpoch}.xml';
+
+    final cmd = 'adb -s $targetId shell uiautomator dump /sdcard/quantum_ui.xml && adb -s $targetId pull /sdcard/quantum_ui.xml "$localPath" && adb -s $targetId shell rm -f /sdcard/quantum_ui.xml';
+    await runtime.runCommand(cmd);
+
+    final f = File(localPath);
+    if (await f.exists()) {
+      final content = await f.readAsString();
+      await f.delete().catchError((_) => f);
+      return content;
+    }
+    throw Exception('Не удалось извлечь иерархию интерфейса (UI hierarchy)');
+  }
+
+  /// Sends tap at coordinate (x, y) on target device
+  Future<void> sendTap(int x, int y, {String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return;
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand(
+        'timeout 4 adb -s $targetId shell input tap $x $y 2>/dev/null || true',
+      );
+    } catch (_) {}
+  }
+
+  /// Sends text to target device
+  Future<void> sendText(String text, {String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null || text.isEmpty) return;
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      final escaped = text
+          .replaceAll('\\', '\\\\')
+          .replaceAll(' ', '%s')
+          .replaceAll('"', '\\"')
+          .replaceAll("'", "\\'")
+          .replaceAll('&', '\\&')
+          .replaceAll('(', '\\(')
+          .replaceAll(')', '\\)')
+          .replaceAll(';', '\\;')
+          .replaceAll('<', '\\<')
+          .replaceAll('>', '\\>');
+      final bashSafe = escaped.replaceAll("'", "'\"'\"'");
+      await runtime.runCommand(
+        "timeout 5 adb -s $targetId shell input text '$bashSafe' 2>/dev/null || true",
+      );
+    } catch (_) {}
+  }
+
+  /// Sends swipe gesture
+  Future<void> sendSwipe(int x1, int y1, int x2, int y2, {int durationMs = 300, String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return;
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand(
+        'timeout 5 adb -s $targetId shell input swipe $x1 $y1 $x2 $y2 $durationMs 2>/dev/null || true',
+      );
+    } catch (_) {}
+  }
+
+  /// Sends keyevent (e.g. 4 for Back, 3 for Home, 66 for Enter)
+  Future<void> sendKeyEvent(int keyCode, {String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return;
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand(
+        'timeout 4 adb -s $targetId shell input keyevent $keyCode 2>/dev/null || true',
+      );
+    } catch (_) {}
+  }
+
+  /// Fetches recent error/crash logcat entries
+  Future<String> getLogcatErrors({int lines = 80, String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return 'Телефон не подключен';
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      final out = await runtime.runCommand(
+        'timeout 6 adb -s $targetId logcat -d -t $lines *:E 2>&1 || true',
+      );
+      return out.trim();
+    } catch (e) {
+      return 'Ошибка получения логов: $e';
+    }
+  }
+
+  /// Automatically heals ADB by ensuring the native ARM64 binary is installed and linked
+  Future<String> fixAdbEnvironment() async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      await runtime.runCommand(
+        'mkdir -p /root/android-sdk/platform-tools && '
+        '(if [ ! -f /usr/bin/adb ]; then '
+        'apt update -qq && apt install -y -qq adb 2>/dev/null || true; '
+        'fi) && '
+        'if [ -f /usr/bin/adb ]; then '
+        'cp -f /usr/bin/adb /root/android-sdk/platform-tools/adb && '
+        'chmod +x /root/android-sdk/platform-tools/adb; '
+        'fi && '
+        'adb kill-server 2>/dev/null; sleep 0.5; adb start-server 2>&1 || true'
+      );
+      await refreshDevices();
+      final ver = await runtime.runCommand('/root/android-sdk/platform-tools/adb version 2>&1 || true');
+      return '✅ ADB проверен и готов к работе:\n${ver.trim()}';
+    } catch (e) {
+      return 'Ошибка проверки ADB: $e';
+    }
+  }
+
+  /// Captures current frame from target device screen as raw PNG bytes
+  Future<Uint8List?> captureScreenFrame({String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return null;
+    final runtime = _ref.read(runtimeServiceProvider);
+
+    // Method 1: Pull directly from device RAM tmpfs (/data/local/tmp) to shared tmp
+    try {
+      final safeId = targetId.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final tmpDir = Directory('${runtime.filesDir}${Platform.pathSeparator}tmp');
+      if (!await tmpDir.exists()) {
+        await tmpDir.create(recursive: true);
+      }
+      final hostTmp = '${tmpDir.path}${Platform.pathSeparator}q_frame_$safeId.png';
+      final guestTmp = runtime.toProotPath(hostTmp);
+      await runtime.runCommand(
+        'timeout 5 adb -s $targetId shell "screencap -p /data/local/tmp/q_screen.png" 2>/dev/null && '
+        'timeout 5 adb -s $targetId pull /data/local/tmp/q_screen.png "$guestTmp" 2>/dev/null || true'
+      );
+      final f = File(hostTmp);
+      if (await f.exists() && await f.length() > 500) {
+        final bytes = await f.readAsBytes();
+        return bytes;
+      }
+    } catch (_) {}
+
+    // Method 2: exec-out with base64 stream
+    try {
+      final base64Str = await runtime.runCommand(
+        'timeout 6 adb -s $targetId exec-out "screencap -p" 2>/dev/null | base64 -w 0 2>/dev/null || true'
+      );
+      final clean = base64Str.replaceAll('\n', '').replaceAll('\r', '').replaceAll(' ', '').trim();
+      if (clean.length > 500) {
+        return base64Decode(clean);
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  /// Gets real screen resolution of target device (width, height)
+  Future<Size> getDeviceDisplaySize({String? deviceId}) async {
+    final targetId = deviceId ?? state.selectedDevice?.id;
+    if (targetId == null) return const Size(1080, 2400);
+    final runtime = _ref.read(runtimeServiceProvider);
+    try {
+      final out = await runtime.runCommand('adb -s $targetId shell wm size 2>/dev/null || true');
+      final match = RegExp(r'(\d+)\s*x\s*(\d+)').firstMatch(out);
+      if (match != null) {
+        final w = double.tryParse(match.group(1)!) ?? 1080;
+        final h = double.tryParse(match.group(2)!) ?? 2400;
+        return Size(w, h);
+      }
+    } catch (_) {}
+    return const Size(1080, 2400);
+  }
+}
+
+final adbDeviceServiceProvider = StateNotifierProvider<AdbDeviceService, AdbDeviceState>((ref) {
+  return AdbDeviceService(ref);
+});

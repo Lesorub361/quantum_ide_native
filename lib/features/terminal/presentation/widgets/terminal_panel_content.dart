@@ -1,0 +1,3686 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:quantum_ide/core/models/code_diagnostic.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:quantum_ide/core/utils/path_mapper.dart';
+import 'package:quantum_ide/core/services/runtime_service.dart';
+import 'package:quantum_ide/core/services/project_sync_service.dart';
+
+import 'package:conduit_vt/conduit_vt.dart' as xt;
+import 'package:quantum_ide/core/theme/conduit_palette.dart';
+import 'package:quantum_ide/features/terminal/conduit/conduit_appearance_sheet.dart';
+import 'package:quantum_ide/features/terminal/conduit/conduit_keyboard_bar.dart';
+import 'package:quantum_ide/features/terminal/conduit/conduit_terminal_surface.dart';
+import 'package:quantum_ide/features/terminal/engine/quantum_terminal_action_bar.dart';
+import 'package:quantum_ide/features/terminal/presentation/notifiers/terminal_tabs_notifier.dart';
+import 'package:quantum_ide/features/terminal/presentation/widgets/virtual_keys.dart';
+import 'package:quantum_ide/features/editor/presentation/notifiers/editor_notifier.dart';
+import 'package:quantum_ide/shared/providers/panel_provider.dart';
+
+import 'package:quantum_ide/core/services/workspace_service.dart';
+import 'package:quantum_ide/core/services/quantum_plugin_service.dart';
+
+import 'package:quantum_ide/features/terminal/presentation/notifiers/dedicated_terminal_notifier.dart';
+
+import 'package:quantum_ide/l10n/app_localizations.dart';
+
+import 'package:quantum_ide/features/git/presentation/widgets/git_panel.dart';
+import 'package:quantum_ide/core/services/settings_service.dart';
+import 'package:quantum_ide/models/project_model.dart';
+import 'package:quantum_ide/core/services/project_service.dart';
+import 'package:quantum_ide/features/terminal/presentation/widgets/apk_signer_widget.dart';
+import 'package:quantum_ide/features/terminal/presentation/widgets/quantum_terminal_tools_modal.dart';
+import 'package:quantum_ide/features/terminal/engine/quantum_link_detector.dart';
+
+import 'package:quantum_ide/features/editor/presentation/widgets/debugger_panel.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/device_mirror_panel.dart';
+import 'package:quantum_ide/features/ai_assistant/roxum/roxum_chat_notifier.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/quantum_ai_agent_panel.dart';
+import 'package:quantum_ide/features/terminal/presentation/widgets/run_build_panels.dart';
+import 'package:quantum_ide/core/services/quantum_ai_agent_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+
+// Project-safe: never mutate user's build.gradle.kts or AndroidManifest.xml.
+const String _ktRepairCmd = '';
+
+class CopyTextIntent extends Intent {
+  const CopyTextIntent();
+}
+
+class PasteTextIntent extends Intent {
+  const PasteTextIntent();
+}
+
+class SelectAllTextIntent extends Intent {
+  const SelectAllTextIntent();
+}
+
+class TerminalFocusNode extends FocusNode {
+  bool allowAutoKeyboard;
+
+  TerminalFocusNode({this.allowAutoKeyboard = true});
+
+  @override
+  bool consumeKeyboardToken() {
+    if (!allowAutoKeyboard) {
+      super.consumeKeyboardToken();
+      return false;
+    }
+    return super.consumeKeyboardToken();
+  }
+}
+
+class TerminalPanelContent extends ConsumerStatefulWidget {
+  final bool onlyTerminal;
+  final VoidCallback? onBack;
+  const TerminalPanelContent({
+    super.key,
+    this.onlyTerminal = false,
+    this.onBack,
+  });
+
+  @override
+  ConsumerState<TerminalPanelContent> createState() =>
+      _TerminalPanelContentState();
+}
+
+class _TerminalPanelContentState extends ConsumerState<TerminalPanelContent>
+    with WidgetsBindingObserver {
+  final Set<String> _activeModifiers = {};
+  bool _isSidebarOpen = false;
+  bool _isTerminalSplit = false;
+  bool _isMobileKeyboardActive = false;
+  bool _keyboardWasVisibleOnScreen = false;
+  bool _isKeyboardVisible = false;
+  bool _inlineSelectionMode = false;
+  String _inlineSelectedText = '';
+  int _problemsSeverityFilter =
+      0; // 0: Все, 1: Ошибки, 2: Предупреждения, 3: Инфо
+  int _buildSubTab = 0;
+  bool _isWakelockEnabled = false;
+  final Map<String, GlobalKey> _terminalKeys = {};
+  final Map<String, TerminalFocusNode> _terminalFocusNodes = {};
+
+  GlobalKey _getTerminalKey(String id) {
+    return _terminalKeys.putIfAbsent(id, () => GlobalKey());
+  }
+
+  TerminalFocusNode _getFocusNode(String id) {
+    final isMobile =
+        Platform.isAndroid ||
+        Platform.isIOS ||
+        (mounted && MediaQuery.sizeOf(context).width < 650);
+    return _terminalFocusNodes.putIfAbsent(
+      id,
+      () => TerminalFocusNode(allowAutoKeyboard: !isMobile),
+    );
+  }
+
+  void _openTerminalKeyboard(
+    TerminalSession session, {
+    bool isSecondary = false,
+    bool clearSelection = false,
+  }) {
+    if (_inlineSelectionMode) return;
+    if (session.xtermViewController.selection != null) {
+      if (clearSelection) {
+        session.xtermViewController.clearSelection();
+      } else {
+        return;
+      }
+    }
+
+    // Clear focus from background editor/inputs so keystrokes route directly to terminal
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    _keyboardWasVisibleOnScreen = false;
+    _isMobileKeyboardActive = true;
+    final keyId = isSecondary ? '${session.id}_sec' : session.id;
+    final focusNode = _getFocusNode(keyId);
+    focusNode.allowAutoKeyboard = true;
+
+    void requestInput() {
+      if (!focusNode.hasFocus) {
+        focusNode.requestFocus();
+      }
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    }
+
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        requestInput();
+      }
+    });
+  }
+
+  void _closeTerminalKeyboard(
+    TerminalSession session, {
+    bool isSecondary = false,
+  }) {
+    _keyboardWasVisibleOnScreen = false;
+    _isMobileKeyboardActive = false;
+    final keyId = isSecondary ? '${session.id}_sec' : session.id;
+    final focusNode = _getFocusNode(keyId);
+    focusNode.allowAutoKeyboard = !(Platform.isAndroid || Platform.isIOS);
+    focusNode.unfocus();
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    if (mounted) setState(() {});
+  }
+
+  void _toggleTerminalKeyboard(
+    TerminalSession session, {
+    bool isSecondary = false,
+  }) {
+    if (_inlineSelectionMode) {
+      setState(() {
+        _inlineSelectionMode = false;
+        _inlineSelectedText = '';
+      });
+    }
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    if (bottomInset > 20) {
+      _closeTerminalKeyboard(session, isSecondary: isSecondary);
+    } else {
+      _openTerminalKeyboard(
+        session,
+        isSecondary: isSecondary,
+        clearSelection: true,
+      );
+    }
+  }
+
+  String _currentInput = '';
+  final ValueNotifier<List<String>?> _suggestionsNotifier = ValueNotifier(null);
+  int _selectedSuggestionIndex = 0;
+  List<String> _pathBinaries = [];
+  Timer? _suggestionsDebounceTimer;
+
+  TerminalSession? _lastAttachedSession;
+  final Set<TerminalSession> _initializedSessions =
+      {}; // Для контроля слушателей выделения
+
+  bool _readKeyboardOpenFromView() {
+    final view = View.maybeOf(context);
+    if (view == null || view.devicePixelRatio <= 0) return false;
+    return (view.viewInsets.bottom / view.devicePixelRatio) > 20;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPathBinaries();
+    WakelockPlus.enabled
+        .then((val) {
+          if (mounted) setState(() => _isWakelockEnabled = val);
+        })
+        .catchError((_) {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final pluginState = ref.read(quantumPluginServiceProvider);
+        ref
+            .read(quantumTerminalBarProvider.notifier)
+            .syncPluginButtons(
+              pluginState.activeTerminalCommands,
+              pluginState.activeCustomButtons,
+            );
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isKeyboardVisible = _readKeyboardOpenFromView();
+  }
+
+  @override
+  void didChangeMetrics() {
+    final nextOpen = _readKeyboardOpenFromView();
+    if (nextOpen) {
+      _keyboardWasVisibleOnScreen = true;
+    } else if (_keyboardWasVisibleOnScreen) {
+      _keyboardWasVisibleOnScreen = false;
+      _isMobileKeyboardActive = false;
+      for (final fn in _terminalFocusNodes.values) {
+        fn.allowAutoKeyboard = false;
+      }
+    }
+    if (nextOpen != _isKeyboardVisible && mounted) {
+      setState(() => _isKeyboardVisible = nextOpen);
+    }
+  }
+
+  Future<void> _toggleWakelock() async {
+    try {
+      final nextState = !_isWakelockEnabled;
+      await WakelockPlus.toggle(enable: nextState);
+      if (mounted) {
+        setState(() => _isWakelockEnabled = nextState);
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  LucideIcons.coffee,
+                  size: 16,
+                  color: nextState ? Colors.orangeAccent : Colors.white60,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    nextState
+                        ? 'Режим бодрствования активен (экран не погаснет во время сборки/команд)'
+                        : 'Режим бодрствования выключен',
+                    style: GoogleFonts.inter(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Wakelock toggle error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    for (final node in _terminalFocusNodes.values) {
+      node.dispose();
+    }
+    _terminalFocusNodes.clear();
+    _terminalKeys.clear();
+    _suggestionsDebounceTimer?.cancel();
+    _suggestionsNotifier.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPathBinaries() async {
+    final runtime = ref.read(runtimeServiceProvider);
+    final appDir = runtime.appDirectory;
+
+    final home = Platform.environment['HOME'] ?? '';
+    final pathDirs = [
+      p.join(appDir, 'rootfs', 'ubuntu', 'bin'),
+      p.join(appDir, 'rootfs', 'ubuntu', 'usr', 'bin'),
+      p.join(appDir, 'rootfs', 'ubuntu', 'usr', 'sbin'),
+      p.join(appDir, 'rootfs', 'ubuntu', 'sbin'),
+      p.join(appDir, 'rootfs', 'ubuntu', 'usr', 'local', 'bin'),
+      p.join(appDir, 'rootfs', 'ubuntu', 'root', 'flutter', 'bin'),
+      p.join(
+        appDir,
+        'rootfs',
+        'ubuntu',
+        'root',
+        'android-sdk',
+        'cmdline-tools',
+        'latest',
+        'bin',
+      ),
+      p.join(
+        appDir,
+        'rootfs',
+        'ubuntu',
+        'root',
+        'android-sdk',
+        'platform-tools',
+      ),
+      '/usr/bin',
+      '/usr/local/bin',
+      if (home.isNotEmpty) p.join(home, '.local', 'bin'),
+    ];
+
+    final binaries = <String>{};
+    const defaultCliTools = [
+      'git',
+      'flutter',
+      'dart',
+      'npm',
+      'npx',
+      'node',
+      'yarn',
+      'pnpm',
+      'python3',
+      'python',
+      'pip',
+      'pip3',
+      'cargo',
+      'rustc',
+      'docker',
+      'curl',
+      'wget',
+      'cat',
+      'grep',
+      'find',
+      'ssh',
+      'scp',
+      'apt',
+      'apt-get',
+      'tar',
+      'zip',
+      'unzip',
+      'ps',
+      'kill',
+      'htop',
+      'ls',
+      'cd',
+      'mkdir',
+      'rm',
+      'cp',
+      'mv',
+      'chmod',
+      'chown',
+      'clear',
+      'bash',
+      'sh',
+      'nano',
+      'vim',
+      'df',
+      'free',
+      'uname',
+      'which',
+      'export',
+      'source',
+      'env',
+    ];
+    binaries.addAll(defaultCliTools);
+
+    for (final dirPath in pathDirs) {
+      try {
+        final dir = Directory(dirPath);
+        if (await dir.exists()) {
+          await for (final entity in dir.list()) {
+            if (entity is File) {
+              final name = p.basename(entity.path);
+              binaries.add(name);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    _pathBinaries = binaries.toList()..sort();
+  }
+
+  String _mapGuestToHostForAutocomplete(
+    String guestPath,
+    RuntimeService runtime,
+  ) {
+    return PathMapper.mapToHost(guestPath, runtime.appDirectory);
+  }
+
+  bool _isAtShellPrompt(TerminalSession session) {
+    if (session.xtermTerminal.isUsingAltBuffer) return false;
+    try {
+      final buf = session.xtermTerminal.buffer;
+      final y = buf.absoluteCursorY;
+      if (y >= 0 && y < buf.lines.length) {
+        final line = buf.lines[y].toString();
+        return line.contains('boss@') ||
+            line.contains('root@') ||
+            line.contains(r'$ ') ||
+            line.contains('# ');
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  void _handleInputForAutocomplete(TerminalSession session, String data) {
+    if (!_isAtShellPrompt(session)) {
+      if (_suggestionsNotifier.value != null) {
+        _suggestionsNotifier.value = null;
+      }
+      _currentInput = '';
+      return;
+    }
+
+    if (data == '\r' || data == '\n') {
+      _suggestionsNotifier.value = null;
+      _currentInput = '';
+      return;
+    }
+
+    if (data == '\x7f' || data == '\b') {
+      if (_currentInput.isNotEmpty) {
+        _currentInput = _currentInput.substring(0, _currentInput.length - 1);
+      }
+    } else if (data == '\t') {
+      final suggestions = _suggestionsNotifier.value;
+      if (suggestions != null && suggestions.isNotEmpty) {
+        _acceptSuggestion(session, suggestions[_selectedSuggestionIndex]);
+      }
+      return;
+    } else if (data == ' ' || data.contains('\x1b')) {
+      _suggestionsNotifier.value = null;
+      _currentInput = '';
+      return;
+    } else if (data.length == 1 && data.codeUnitAt(0) >= 32) {
+      _currentInput += data;
+    } else {
+      return;
+    }
+
+    _suggestionsDebounceTimer?.cancel();
+    _suggestionsDebounceTimer = Timer(const Duration(milliseconds: 70), () {
+      if (mounted) _updateSuggestions(session);
+    });
+  }
+
+  Future<void> _updateSuggestions(TerminalSession session) async {
+    if (_currentInput.isEmpty) {
+      _suggestionsNotifier.value = null;
+      return;
+    }
+
+    final query = _currentInput.trim();
+    if (query.isEmpty) {
+      _suggestionsNotifier.value = null;
+      return;
+    }
+
+    List<String> matches = [];
+
+    if (_currentInput.startsWith('./') ||
+        _currentInput.startsWith('/') ||
+        _currentInput.startsWith('~/') ||
+        _currentInput.contains('/')) {
+      final pathSuggestions = await _getPathSuggestions(session, _currentInput);
+      if (pathSuggestions.isNotEmpty) {
+        if (query.length >= 2) {
+          final queryLower = query.toLowerCase();
+          matches = pathSuggestions
+              .where((p) => p.toLowerCase().contains(queryLower))
+              .take(10)
+              .toList();
+        } else {
+          matches = pathSuggestions.take(10).toList();
+        }
+      }
+    } else {
+      if (_pathBinaries.isNotEmpty) {
+        final queryLower = query.toLowerCase();
+        final prefixMatches = _pathBinaries
+            .where((bin) => bin.toLowerCase().startsWith(queryLower))
+            .take(6)
+            .toList();
+
+        final containsMatches = _pathBinaries
+            .where(
+              (bin) =>
+                  bin.toLowerCase().contains(queryLower) &&
+                  !bin.toLowerCase().startsWith(queryLower),
+            )
+            .take(8)
+            .toList();
+
+        final combined = <String>{...prefixMatches, ...containsMatches};
+        matches = combined.take(10).toList();
+      }
+    }
+
+    if (matches.isEmpty) {
+      _suggestionsNotifier.value = null;
+    } else {
+      _selectedSuggestionIndex = 0;
+      _suggestionsNotifier.value = matches;
+    }
+  }
+
+  Future<List<String>> _getPathSuggestions(
+    TerminalSession session,
+    String input,
+  ) async {
+    try {
+      final runtime = ref.read(runtimeServiceProvider);
+      final workspace = ref.read(workspaceProvider);
+
+      final hostProjectDir =
+          workspace.currentPath ?? p.join(runtime.appDirectory, 'projects');
+      final hostHomeDir = p.join(
+        runtime.appDirectory,
+        'rootfs',
+        'ubuntu',
+        'root',
+      );
+
+      String searchPath;
+      String prefix = '';
+
+      if (input.startsWith('~/')) {
+        searchPath = p.join(hostHomeDir, input.substring(2));
+        prefix = '~/';
+      } else if (input.startsWith('./')) {
+        searchPath = p.join(hostProjectDir, input.substring(2));
+        prefix = './';
+      } else if (input.startsWith('/')) {
+        searchPath = _mapGuestToHostForAutocomplete(input, runtime);
+        prefix = '';
+      } else {
+        searchPath = p.join(hostProjectDir, input);
+        prefix = '';
+      }
+
+      final lastSlash = searchPath.lastIndexOf('/');
+      final dirPath = lastSlash >= 0
+          ? searchPath.substring(0, lastSlash + 1)
+          : searchPath;
+      final partial = lastSlash >= 0
+          ? searchPath.substring(lastSlash + 1).toLowerCase()
+          : '';
+
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) return [];
+
+      final suggestions = <String>[];
+      await for (final entity in dir.list()) {
+        final name = p.basename(entity.path);
+        if (partial.isEmpty || name.toLowerCase().startsWith(partial)) {
+          final isDir = entity is Directory;
+          String displayPath = prefix;
+          if (prefix == '~/') {
+            displayPath += p.relative(entity.path, from: hostHomeDir);
+          } else if (prefix == './') {
+            displayPath += p.relative(entity.path, from: hostProjectDir);
+          } else if (input.startsWith('/')) {
+            final relativeToRootfs = p.relative(
+              entity.path,
+              from: p.join(runtime.appDirectory, 'rootfs', 'ubuntu'),
+            );
+            displayPath = relativeToRootfs.startsWith('.')
+                ? entity.path
+                : '/$relativeToRootfs';
+          } else {
+            displayPath = name;
+          }
+          suggestions.add(isDir ? '$displayPath/' : displayPath);
+        }
+      }
+
+      suggestions.sort();
+      return suggestions.take(10).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  void _acceptSuggestion(TerminalSession session, String suggestion) {
+    if (suggestion.startsWith(_currentInput)) {
+      final toSend = suggestion.substring(_currentInput.length);
+      session.pty.write(Uint8List.fromList(utf8.encode(toSend)));
+    } else {
+      final delSequence = '\x7f' * _currentInput.length;
+      session.pty.write(
+        Uint8List.fromList(utf8.encode('$delSequence$suggestion')),
+      );
+    }
+    _currentInput = suggestion;
+    _suggestionsNotifier.value = null;
+  }
+
+  static String _sanitizeTerminalInput(String text) {
+    return text
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('«', '"')
+        .replaceAll('»', '"')
+        .replaceAll('‘', "'")
+        .replaceAll('’', "'")
+        .replaceAll('—', '--')
+        .replaceAll('–', '-')
+        .replaceAll('\u200B', '')
+        .replaceAll('\u200C', '')
+        .replaceAll('\u200D', '')
+        .replaceAll('\uFEFF', '')
+        .replaceAll('\u00A0', ' ')
+        .replaceAll('\u202F', ' ')
+        .replaceAll(RegExp(r'\\\r?\n\s*'), ' ');
+  }
+
+  void _attachTerminalOutputListener(TerminalSession session) {
+    session.xtermTerminal.onOutput = (data) {
+      final hadCtrl = _activeModifiers.contains('CTRL');
+      final hadAlt = _activeModifiers.contains('ALT');
+      final hadShift = _activeModifiers.contains('SHIFT');
+
+      String sequence = '';
+      if (hadCtrl) {
+        if (data.length == 1) {
+          final int code = data.toUpperCase().codeUnitAt(0);
+          if (code >= 65 && code <= 90) {
+            sequence = String.fromCharCode(code - 64);
+          } else {
+            sequence = data;
+          }
+        } else {
+          sequence = data;
+        }
+      } else if (hadAlt) {
+        sequence = '\x1b$data';
+      } else if (hadShift) {
+        sequence = data.toUpperCase();
+      } else {
+        sequence = data;
+      }
+
+      if (sequence.isNotEmpty) {
+        final sanitized = _sanitizeTerminalInput(sequence);
+        session.pty.write(Uint8List.fromList(utf8.encode(sanitized)));
+        if (sanitized.length == 1 && data.length == 1) {
+          _handleInputForAutocomplete(session, sanitized);
+        }
+      }
+
+      if (hadCtrl || hadAlt || hadShift) {
+        setState(() {
+          _activeModifiers.remove('CTRL');
+          _activeModifiers.remove('ALT');
+          _activeModifiers.remove('SHIFT');
+        });
+      }
+    };
+  }
+
+  void _toggleInlineSelectionMode(TerminalSession session) {
+    setState(() {
+      _inlineSelectionMode = !_inlineSelectionMode;
+      _inlineSelectedText = '';
+    });
+    if (_inlineSelectionMode) {
+      _closeTerminalKeyboard(session);
+    }
+  }
+
+  void _onKeyTap(String value, TerminalSession session) async {
+    final term = session.xtermTerminal;
+    if (value == 'ctrl') {
+      setState(() {
+        if (_activeModifiers.contains('CTRL')) {
+          _activeModifiers.remove('CTRL');
+        } else {
+          _activeModifiers.clear();
+          _activeModifiers.add('CTRL');
+        }
+      });
+      return;
+    }
+    if (value == 'ALT') {
+      setState(() {
+        if (_activeModifiers.contains('ALT')) {
+          _activeModifiers.remove('ALT');
+        } else {
+          _activeModifiers.clear();
+          _activeModifiers.add('ALT');
+        }
+      });
+      return;
+    }
+    if (value == 'SHIFT') {
+      setState(() {
+        if (_activeModifiers.contains('SHIFT')) {
+          _activeModifiers.remove('SHIFT');
+        } else {
+          _activeModifiers.clear();
+          _activeModifiers.add('SHIFT');
+        }
+      });
+      return;
+    }
+    if (value == 'toggle_keyboard') {
+      _toggleTerminalKeyboard(session);
+      return;
+    }
+    if (value == 'inline_selection_mode') {
+      _toggleInlineSelectionMode(session);
+      return;
+    }
+    if (value == 'selection_mode') {
+      _selectAllInTerminal(session);
+      return;
+    }
+    if (value == 'copy_all_output') {
+      _copyTerminalOutputDirect(session);
+      return;
+    }
+    if (value == 'terminal_hub') {
+      QuantumTerminalToolsModal.show(context, session);
+      return;
+    }
+    if (value == 'insert_path') {
+      QuantumTerminalToolsModal.show(
+        context,
+        session,
+        initialTab: TerminalToolTab.filePicker,
+      );
+      return;
+    }
+    if (value == 'terminal_history') {
+      QuantumTerminalToolsModal.show(
+        context,
+        session,
+        initialTab: TerminalToolTab.commandHistory,
+      );
+      return;
+    }
+    if (value == 'terminal_processes') {
+      QuantumTerminalToolsModal.show(
+        context,
+        session,
+        initialTab: TerminalToolTab.processManager,
+      );
+      return;
+    }
+    if (value.startsWith('cmd:')) {
+      final cmd = value.substring(4);
+      if (_inlineSelectionMode) {
+        setState(() {
+          _inlineSelectionMode = false;
+          _inlineSelectedText = '';
+        });
+      }
+      session.pty.write(Uint8List.fromList(utf8.encode(cmd)));
+      return;
+    }
+    if (value == 'paste') {
+      await _pasteToTerminal(session);
+      return;
+    }
+    if (value == 'copy') {
+      if (_inlineSelectionMode && _inlineSelectedText.trim().isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: _inlineSelectedText));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!.copiedToClipboard),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 1),
+            ),
+          );
+        }
+        return;
+      }
+      await _copySelection(session);
+      return;
+    }
+    if (value == 'select_all' || value == 'sel') {
+      _selectAllInTerminal(session);
+      return;
+    }
+    if (value == 'ctrl+c') {
+      session.pty.write(Uint8List.fromList([3]));
+      return;
+    }
+    if (value == 'ctrl+z') {
+      session.pty.write(Uint8List.fromList([26]));
+      return;
+    }
+    if (value == 'ctrl+d') {
+      session.pty.write(Uint8List.fromList([4]));
+      return;
+    }
+    if (value == 'ctrl+l') {
+      session.pty.write(Uint8List.fromList([12]));
+      return;
+    }
+
+    if (value == '\x7f') {
+      session.pty.write(Uint8List.fromList([127]));
+      _handleInputForAutocomplete(session, '\x7f');
+      return;
+    }
+
+    if (value == '\r' || value == '\n' || value == 'enter' || value == 'ENTER') {
+      session.pty.write(Uint8List.fromList([13]));
+      return;
+    }
+
+    final hadCtrl = _activeModifiers.contains('CTRL');
+    final hadAlt = _activeModifiers.contains('ALT');
+    final hadShift = _activeModifiers.contains('SHIFT');
+    if (hadCtrl) _activeModifiers.remove('CTRL');
+    if (hadAlt) _activeModifiers.remove('ALT');
+    if (hadShift) _activeModifiers.remove('SHIFT');
+
+    if (value == '\t') {
+      final suggestions = _suggestionsNotifier.value;
+      if (suggestions != null && suggestions.isNotEmpty) {
+        _acceptSuggestion(session, suggestions[_selectedSuggestionIndex]);
+        return;
+      }
+      term.keyInput(
+        xt.TerminalKey.tab,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b') {
+      term.keyInput(
+        xt.TerminalKey.escape,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b[A') {
+      term.keyInput(
+        xt.TerminalKey.arrowUp,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b[B') {
+      term.keyInput(
+        xt.TerminalKey.arrowDown,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b[D') {
+      term.keyInput(
+        xt.TerminalKey.arrowLeft,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b[C') {
+      term.keyInput(
+        xt.TerminalKey.arrowRight,
+        ctrl: hadCtrl,
+        alt: hadAlt,
+        shift: hadShift,
+      );
+    } else if (value == '\x1b[H' ||
+        value == '\x1b[F' ||
+        value == '\x1b[5~' ||
+        value == '\x1b[6~') {
+      session.pty.write(Uint8List.fromList(utf8.encode(value)));
+    } else if (value.length == 1 && hadCtrl) {
+      final code = value.toUpperCase().codeUnitAt(0);
+      if (code >= 65 && code <= 90) {
+        session.pty.write(Uint8List.fromList([code - 64]));
+      } else {
+        session.pty.write(Uint8List.fromList(utf8.encode(value)));
+      }
+    } else if (value.length == 1 && hadAlt) {
+      session.pty.write(Uint8List.fromList(utf8.encode('\x1b$value')));
+    } else {
+      session.pty.write(Uint8List.fromList(utf8.encode(value)));
+      _handleInputForAutocomplete(session, value);
+    }
+    if (!mounted) return;
+    if (hadCtrl || hadAlt || hadShift) {
+      setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final panelState = ref.watch(panelProvider);
+    final sessions = ref.watch(terminalTabsProvider);
+    final notifier = ref.read(terminalTabsProvider.notifier);
+
+    final termSettings = ref.watch(settingsProvider);
+    final termPalette = termSettings.syncAppWithTerminalPalette
+        ? resolveConduitPalette(termSettings.terminalTheme)
+        : null;
+
+    final contentColumn = Column(
+      children: [
+        Expanded(
+          child: widget.onlyTerminal
+              ? _buildTerminalView(
+                  sessions,
+                  notifier,
+                  key: const ValueKey('terminal'),
+                  isActive: true,
+                )
+              : _buildBody(panelState, sessions, notifier),
+        ),
+        if ((widget.onlyTerminal ||
+                panelState.selectedTab == PanelTab.terminal) &&
+            sessions.isNotEmpty &&
+            notifier.currentIndex < sessions.length &&
+            (!_isKeyboardVisible && !_isMobileKeyboardActive))
+          _buildPluginCommandsBar(sessions[notifier.currentIndex]),
+        if ((widget.onlyTerminal ||
+                panelState.selectedTab == PanelTab.terminal) &&
+            (Platform.isAndroid ||
+                Platform.isIOS ||
+                MediaQuery.sizeOf(context).width < 650))
+          _buildVirtualKeys(sessions, notifier),
+      ],
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: termPalette?.panel ?? const Color(0xFF0D0F14),
+      ),
+      child: SafeArea(
+        bottom: true,
+        child: widget.onlyTerminal
+            ? Builder(
+                builder: (insetCtx) => Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.viewInsetsOf(insetCtx).bottom,
+                  ),
+                  child: contentColumn,
+                ),
+              )
+            : contentColumn,
+      ),
+    );
+  }
+
+  final Set<PanelTab> _visitedTabs = {PanelTab.terminal};
+
+  Widget _buildBody(
+    PanelState state,
+    List<TerminalSession> sessions,
+    TerminalTabsNotifier notifier,
+  ) {
+    const tabs = PanelTab.values;
+    final index = tabs.indexOf(state.selectedTab);
+    _visitedTabs.add(state.selectedTab);
+
+    return IndexedStack(
+      index: index,
+      children: tabs.map((tab) {
+        if (!_visitedTabs.contains(tab)) {
+          return const SizedBox.shrink();
+        }
+        return _getTabWidget(
+          tab,
+          sessions,
+          notifier,
+          tab == state.selectedTab,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _getTabWidget(
+    PanelTab tab,
+    List<TerminalSession> sessions,
+    TerminalTabsNotifier notifier, [
+    bool isCurrent = false,
+  ]) {
+    switch (tab) {
+      case PanelTab.terminal:
+        return _buildTerminalView(
+          sessions,
+          notifier,
+          key: const ValueKey('terminal'),
+          isActive: isCurrent,
+        );
+      case PanelTab.run:
+        return SidebarRunPanel(
+          key: const ValueKey('bottom_run'),
+          isActive: isCurrent,
+        );
+      case PanelTab.buildLogs:
+        return SidebarBuildPanel(
+          key: const ValueKey('bottom_build'),
+          isActive: isCurrent,
+        );
+      case PanelTab.appLogs:
+        return _buildAppLogsView(
+          key: const ValueKey('appLogs'),
+          isActive: isCurrent,
+        );
+      case PanelTab.problems:
+        return Consumer(
+          key: const ValueKey('problems'),
+          builder: (context, ref, _) =>
+              _buildProblemsView(ref.watch(editorProvider)),
+        );
+      case PanelTab.git:
+        return _buildGitView();
+      case PanelTab.debug:
+        return const DebuggerPanel(key: ValueKey('debug'));
+      case PanelTab.deviceMirror:
+        return DeviceMirrorPanel(
+          key: const ValueKey('deviceMirror'),
+          isActive: isCurrent,
+        );
+      case PanelTab.aiAgent:
+        return const QuantumAiAgentPanel(key: ValueKey('aiAgent'));
+    }
+  }
+
+  Widget _buildGitView() {
+    return const SidebarGitPanel(isBottomPanel: true);
+  }
+
+  Widget _buildAppLogsView({Key? key, bool isActive = true}) {
+    return Consumer(
+      key: key,
+      builder: (context, ref, _) {
+        final l10n = AppLocalizations.of(context)!;
+        final dedicatedState = ref.watch(dedicatedTerminalProvider);
+        final session = dedicatedState.sessions[DedicatedTerminalType.appLogs];
+
+        return Column(
+          children: [
+            _buildActionHeader(l10n.appLogs, [
+              _buildActionButton(
+                'Logs',
+                LucideIcons.list,
+                Colors.cyanAccent,
+                () => _runDedicatedCommand(
+                  DedicatedTerminalType.appLogs,
+                  'flutter logs',
+                ),
+              ),
+              _buildActionButton(
+                'ADB Logcat',
+                LucideIcons.smartphone,
+                Colors.greenAccent,
+                () => _runDedicatedCommand(
+                  DedicatedTerminalType.appLogs,
+                  'if [ -f /usr/bin/adb ]; then mkdir -p /root/android-sdk/platform-tools && cp -f /usr/bin/adb /root/android-sdk/platform-tools/adb 2>/dev/null && chmod +x /root/android-sdk/platform-tools/adb 2>/dev/null; fi ; adb logcat -v time *:V',
+                ),
+              ),
+              _buildActionButton(
+                l10n.copy,
+                LucideIcons.copy,
+                Colors.white60,
+                () => _copyTerminalOutput(DedicatedTerminalType.appLogs),
+              ),
+              _buildActionButton(
+                l10n.setupSdk,
+                LucideIcons.settings,
+                Colors.purpleAccent,
+                () => _runDedicatedCommand(
+                  DedicatedTerminalType.appLogs,
+                  'kill -9 \$(pgrep -x "apt|apt-get|dpkg|dpkg-deb" 2>/dev/null) 2>/dev/null ; rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null ; dpkg --configure -a 2>/dev/null ; apt update && apt install -y debianutils libz1 libexpat1 openjdk-21-jdk wget unzip libstdc++6 zlib1g zlib1g-dev libncurses6 libtinfo6 libc++1 libc6 aapt adb zipalign apksigner clang lld cmake ninja-build pkg-config libgtk-3-dev && git config --global --add safe.directory \'*\' && mkdir -p /root/android-sdk/licenses /root/android-sdk/platform-tools && cp -f /usr/bin/adb /root/android-sdk/platform-tools/adb 2>/dev/null && chmod +x /root/android-sdk/platform-tools/adb 2>/dev/null && printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\\nd56f5187479451eabf01fb78af6dfcb131a6481e\\n2fa2d150aa0a1204d10e5ed57ab8369e7b50077c\\n" > /root/android-sdk/licenses/android-sdk-license && printf "84831b9409646a918e30573bab4c9c91346d8abd\\n" > /root/android-sdk/licenses/android-sdk-preview-license && printf "859f317696f67ef3d7f30a50a5560e7834b43903\\n" > /root/android-sdk/licenses/android-sdk-arm-dbt-license && (flutter config --android-sdk /root/android-sdk 2>/dev/null || true) && (flutter config --jdk-dir /usr/lib/jvm/java-17-openjdk-arm64 2>/dev/null || flutter config --jdk-dir /usr/lib/jvm/java-21-openjdk-arm64 2>/dev/null || true) && (which which >/dev/null || (printf \'#!/bin/sh\\ncommand -v "\$1"\\n\' > /usr/bin/which && chmod +x /usr/bin/which))',
+                ),
+              ),
+            ]),
+            Expanded(
+              child: session != null
+                  ? _buildTerminalWidget(session, autoResize: isActive)
+                  : Center(
+                      child: Text(
+                        l10n.appLogs,
+                        style: const TextStyle(color: Colors.white38),
+                      ),
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildActionHeader(String title, List<Widget> actions) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.cyanAccent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              title.toUpperCase(),
+              style: GoogleFonts.inter(
+                color: Colors.cyanAccent,
+                fontSize: 8.5,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.0,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(children: actions),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: color.withValues(alpha: 0.32),
+                  width: 0.9,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 13.5, color: color),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(
+                      color: Colors.white.withValues(alpha: 0.95),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _runDedicatedCommand(
+    DedicatedTerminalType type,
+    String cmd, {
+    String? displayCmd,
+  }) {
+    ref.read(projectSyncProvider.notifier).cancelSync();
+
+    final workspace = ref.read(workspaceProvider);
+    final path = workspace.currentPath;
+    final runtime = ref.read(runtimeServiceProvider);
+    final guestPath = path != null
+        ? PathMapper.mapToGuest(path, runtime.appDirectory)
+        : null;
+
+    final cdCmd = guestPath != null
+        ? 'mkdir -p "$guestPath" 2>/dev/null; cd "$guestPath"'
+        : '';
+    final shown = displayCmd ?? cmd;
+    final safeLabel = shown
+        .replaceAll(r'\', r'\\')
+        .replaceAll('"', r'\"')
+        .replaceAll(r'$', r'\$');
+    const clearScreen = 'printf "\\033[2J\\033[H\\033[3J"';
+    final banner =
+        'printf "\\033[1;36m▶ %s\\033[0m\\n\\033[0;34m──────────────────────────────────────────────────\\033[0m\\n" "$safeLabel"';
+    const restoreTty = '; (stty sane 2>/dev/null || true); printf "\\r\\n"';
+    final fullCmd = cdCmd.isNotEmpty
+        ? '$clearScreen && $cdCmd && $banner && ($cmd)$restoreTty'
+        : '$clearScreen && $banner && ($cmd)$restoreTty';
+    ref
+        .read(dedicatedTerminalProvider.notifier)
+        .sendCommand(type, fullCmd, interrupt: true, clear: false);
+  }
+
+  void _sendRawKeyToDedicatedTerminal(DedicatedTerminalType type, String key) {
+    ref.read(dedicatedTerminalProvider.notifier).sendRawChar(type, key);
+  }
+
+  String _extractTerminalText(xt.Terminal terminal) {
+    final buffer = terminal.buffer;
+    final rawLines = <String>[];
+    for (var i = 0; i < buffer.lines.length; i++) {
+      rawLines.add(buffer.lines[i].toString().trimRight());
+    }
+    while (rawLines.isNotEmpty && rawLines.last.isEmpty) {
+      rawLines.removeLast();
+    }
+    final deduped = _deduplicateTerminalLines(rawLines);
+    return deduped.join('\n');
+  }
+
+  /// Removes consecutive duplicate multi-line blocks caused by TUI redraws
+  /// overflowing into the scrollback buffer.
+  List<String> _deduplicateTerminalLines(List<String> lines) {
+    if (lines.length < 6) return lines;
+    final result = <String>[];
+    int i = 0;
+    while (i < lines.length) {
+      bool skippedBlock = false;
+      final maxWindow = ((lines.length - i) ~/ 2).clamp(0, 80);
+      for (int w = maxWindow; w >= 3; w--) {
+        int nonEmpty = 0;
+        bool matches = true;
+        for (int k = 0; k < w; k++) {
+          if (lines[i + k] != lines[i + w + k]) {
+            matches = false;
+            break;
+          }
+          if (lines[i + k].trim().isNotEmpty) nonEmpty++;
+        }
+        if (matches && nonEmpty >= 2) {
+          // Skip the first copy of the repeated block and advance to the second copy
+          i += w;
+          skippedBlock = true;
+          break;
+        }
+      }
+      if (!skippedBlock) {
+        result.add(lines[i]);
+        i++;
+      }
+    }
+    return result;
+  }
+
+  Future<void> _copyTerminalOutput(DedicatedTerminalType type) async {
+    final dedicatedState = ref.read(dedicatedTerminalProvider);
+    final session = dedicatedState.sessions[type];
+    if (session == null) return;
+
+    final text = _extractTerminalText(session.xtermTerminal);
+
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.copiedToClipboard),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _copyTerminalOutputDirect(TerminalSession session) async {
+    final text = _extractTerminalText(session.xtermTerminal);
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(
+                  LucideIcons.check,
+                  color: Colors.greenAccent,
+                  size: 15,
+                ),
+                const SizedBox(width: 8),
+                Text(AppLocalizations.of(context)!.copiedToClipboard),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildTerminalActionButton(
+    IconData icon,
+    String tooltip,
+    VoidCallback onTap, {
+    Color? color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 1.5),
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: (color ?? Colors.white).withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: (color ?? Colors.white).withValues(alpha: 0.08),
+                  width: 0.5,
+                ),
+              ),
+              child: Icon(icon, size: 12, color: color ?? Colors.white70),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionsSidebarList(
+    List<TerminalSession> sessions,
+    TerminalTabsNotifier notifier, {
+    bool isOverlay = false,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF131722).withValues(alpha: 0.95),
+        border: Border(
+          right: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  LucideIcons.terminal,
+                  size: 14,
+                  color: Colors.cyanAccent,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  AppLocalizations.of(context)!.sessionsTitle,
+                  style: GoogleFonts.inter(
+                    color: Colors.white70,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1.5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${sessions.length}',
+                    style: const TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => notifier.createNewSession(),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: Colors.cyanAccent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.cyanAccent.withValues(alpha: 0.2),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Icon(
+                        LucideIcons.plus,
+                        size: 13,
+                        color: Colors.cyanAccent,
+                      ),
+                    ),
+                  ),
+                ),
+                if (isOverlay) ...[
+                  const SizedBox(width: 6),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => setState(() => _isSidebarOpen = false),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        child: const Icon(
+                          LucideIcons.x,
+                          size: 14,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Colors.white10),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              itemCount: sessions.length,
+              itemBuilder: (context, index) {
+                final isActive = index == notifier.currentIndex;
+                final session = sessions[index];
+                final isExited = session.isExited;
+                final statusColor = isExited
+                    ? Colors.redAccent
+                    : Colors.greenAccent;
+
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.only(bottom: 6),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? Colors.cyanAccent.withValues(alpha: 0.1)
+                        : Colors.white.withValues(alpha: 0.02),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isActive
+                          ? Colors.cyanAccent.withValues(alpha: 0.4)
+                          : Colors.white.withValues(alpha: 0.04),
+                      width: isActive ? 1.0 : 0.6,
+                    ),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        notifier.currentIndex = index;
+                        if (isOverlay) {
+                          setState(() => _isSidebarOpen = false);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: statusColor,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: statusColor.withValues(alpha: 0.6),
+                                    blurRadius: 4,
+                                    spreadRadius: 1,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    session.title,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: isActive
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontWeight: isActive
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    isExited
+                                        ? AppLocalizations.of(
+                                            context,
+                                          )!.sessionExited
+                                        : AppLocalizations.of(
+                                            context,
+                                          )!.sessionRunning,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 8.5,
+                                      color: statusColor.withValues(alpha: 0.7),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isActive || sessions.length > 1)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () =>
+                                          notifier.restartSession(index),
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(4),
+                                        child: Icon(
+                                          isExited
+                                              ? LucideIcons.play
+                                              : LucideIcons.refresh_cw,
+                                          size: 11,
+                                          color: isExited
+                                              ? Colors.greenAccent
+                                              : Colors.white54,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => notifier.closeSession(index),
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(
+                                          LucideIcons.trash_2,
+                                          size: 11,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTerminalView(
+    List<TerminalSession> sessions,
+    TerminalTabsNotifier notifier, {
+    Key? key,
+    bool isActive = true,
+  }) {
+    if (sessions.isEmpty)
+      return const Center(child: CircularProgressIndicator());
+    final currentSession = sessions[notifier.currentIndex];
+
+    return LayoutBuilder(
+      key: key,
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 650;
+        final l10n = AppLocalizations.of(context)!;
+
+        final terminalContent = Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F1219),
+                border: Border(
+                  bottom: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.05),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  InkWell(
+                    onTap: () =>
+                        setState(() => _isSidebarOpen = !_isSidebarOpen),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _isSidebarOpen
+                            ? Colors.cyanAccent.withValues(alpha: 0.15)
+                            : Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: _isSidebarOpen
+                              ? Colors.cyanAccent.withValues(alpha: 0.3)
+                              : Colors.white.withValues(alpha: 0.08),
+                          width: 0.5,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            LucideIcons.terminal,
+                            size: 12,
+                            color: _isSidebarOpen
+                                ? Colors.cyanAccent
+                                : Colors.white70,
+                          ),
+                          if (sessions.length > 1) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '${sessions.length}',
+                              style: TextStyle(
+                                color: _isSidebarOpen
+                                    ? Colors.cyanAccent
+                                    : Colors.white60,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: currentSession.isExited
+                          ? Colors.redAccent
+                          : Colors.greenAccent,
+                      boxShadow: [
+                        BoxShadow(
+                          color:
+                              (currentSession.isExited
+                                      ? Colors.redAccent
+                                      : Colors.greenAccent)
+                                  .withValues(alpha: 0.5),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      currentSession.title,
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (!isCompact) ...[
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        ref
+                                .watch(workspaceProvider)
+                                .currentPath
+                                ?.split('/')
+                                .last ??
+                            'workspace',
+                        style: GoogleFonts.jetBrainsMono(
+                          color: Colors.white30,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                  if (!isCompact) ...[
+                    _buildTerminalActionButton(
+                      _isTerminalSplit
+                          ? LucideIcons.square
+                          : LucideIcons.columns_2,
+                      _isTerminalSplit ? l10n.mergeScreen : l10n.splitScreen,
+                      () {
+                        setState(() {
+                          _isTerminalSplit = !_isTerminalSplit;
+                          if (_isTerminalSplit && sessions.length < 2) {
+                            notifier.createNewSession();
+                          }
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 3),
+                    _buildTerminalActionButton(
+                      LucideIcons.coffee,
+                      _isWakelockEnabled
+                          ? l10n.keepScreenOnActive
+                          : l10n.keepScreenOn,
+                      _toggleWakelock,
+                      color: _isWakelockEnabled
+                          ? Colors.orangeAccent
+                          : Colors.white60,
+                    ),
+                    const SizedBox(width: 3),
+                  ],
+                  _buildTerminalActionButton(
+                    LucideIcons.palette,
+                    'Фон, палитра и шрифт',
+                    () => showConduitAppearanceSheet(context, ref),
+                    color: Colors.cyanAccent,
+                  ),
+                  const SizedBox(width: 3),
+                  _buildTerminalActionButton(
+                    LucideIcons.plus,
+                    l10n.newSession,
+                    () => notifier.createNewSession(),
+                    color: Colors.cyanAccent,
+                  ),
+                  const SizedBox(width: 3),
+                  _buildTerminalActionButton(
+                    LucideIcons.sparkles,
+                    'Quantum Terminal Hub (ИИ, Пути, Процессы)',
+                    () =>
+                        QuantumTerminalToolsModal.show(context, currentSession),
+                    color: const Color(0xFFC084FC),
+                  ),
+                  const SizedBox(width: 4),
+                  Material(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(4),
+                    child: InkWell(
+                      onTap: () {
+                        currentSession.xtermTerminal.eraseDisplay();
+                        currentSession.xtermTerminal.eraseScrollbackOnly();
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          'CLR',
+                          style: GoogleFonts.jetBrainsMono(
+                            color: Colors.white60,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  _buildTerminalActionButton(
+                    LucideIcons.ellipsis_vertical,
+                    l10n.terminalMenu,
+                    () => _showTerminalContextMenu(
+                      context,
+                      Offset.zero,
+                      currentSession,
+                      fromToolbar: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: (_isTerminalSplit && sessions.length >= 2)
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 3,
+                                  horizontal: 8,
+                                ),
+                                color: Colors.white.withValues(alpha: 0.02),
+                                width: double.infinity,
+                                child: Text(
+                                  '${AppLocalizations.of(context)!.panel1}: ${sessions[notifier.currentIndex].title}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 8.5,
+                                    color: Colors.cyanAccent,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildTerminalWidget(
+                                  sessions[notifier.currentIndex],
+                                  autoResize: isActive,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 3,
+                                  horizontal: 8,
+                                ),
+                                color: Colors.white.withValues(alpha: 0.02),
+                                width: double.infinity,
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      '${AppLocalizations.of(context)!.panel2}: ${sessions[(notifier.currentIndex + 1) % sessions.length].title}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 8.5,
+                                        color: Colors.cyanAccent.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    InkWell(
+                                      onTap: () => setState(
+                                        () => _isTerminalSplit = false,
+                                      ),
+                                      child: const Icon(
+                                        LucideIcons.x,
+                                        size: 10,
+                                        color: Colors.white38,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: _buildTerminalWidget(
+                                  sessions[(notifier.currentIndex + 1) %
+                                      sessions.length],
+                                  isSecondary: true,
+                                  autoResize: isActive,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  : _buildTerminalWidget(currentSession, autoResize: isActive),
+            ),
+          ],
+        );
+
+        return Stack(
+          children: [
+            terminalContent,
+            if (_isSidebarOpen) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => setState(() => _isSidebarOpen = false),
+                  child: Container(color: Colors.black.withValues(alpha: 0.55)),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: isCompact ? 230 : 240,
+                child: _buildSessionsSidebarList(
+                  sessions,
+                  notifier,
+                  isOverlay: true,
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildInlineSelectableTerminal(
+    TerminalSession session,
+    xt.TerminalTheme theme,
+    double terminalFontSize,
+  ) {
+    final fullText = _extractTerminalText(session.xtermTerminal);
+    final l10n = AppLocalizations.of(context)!;
+
+    return Container(
+      margin: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: theme.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.cyanAccent.withValues(alpha: 0.45),
+          width: 1.0,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF151924),
+              border: Border(
+                bottom: BorderSide(
+                  color: Colors.cyanAccent.withValues(alpha: 0.25),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  LucideIcons.mouse_pointer_click,
+                  size: 13,
+                  color: Colors.cyanAccent,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _inlineSelectedText.isNotEmpty
+                        ? 'Выделено символов: ${_inlineSelectedText.length}'
+                        : 'Выделяйте текст прямо в терминале (зажмите или проведите)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.cyanAccent,
+                    ),
+                  ),
+                ),
+                if (_inlineSelectedText.isNotEmpty) ...[
+                  InkWell(
+                    onTap: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: _inlineSelectedText),
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(l10n.copiedToClipboard),
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(5),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.cyanAccent.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            LucideIcons.copy,
+                            size: 12,
+                            color: Colors.cyanAccent,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            l10n.copy,
+                            style: GoogleFonts.inter(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                InkWell(
+                  onTap: () => _copyTerminalOutputDirect(session),
+                  borderRadius: BorderRadius.circular(5),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      l10n.copyAll,
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () => setState(() {
+                    _inlineSelectionMode = false;
+                    _inlineSelectedText = '';
+                  }),
+                  borderRadius: BorderRadius.circular(5),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.amberAccent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      l10n.closeSelection,
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amberAccent,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                reverse: true,
+                padding: const EdgeInsets.all(10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SelectableText(
+                    fullText.isEmpty ? '(Пустой вывод терминала)' : fullText,
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: terminalFontSize,
+                      color: theme.foreground,
+                      height: 1.35,
+                    ),
+                    onSelectionChanged: (selection, cause) {
+                      if (selection.start >= 0 &&
+                          selection.end <= fullText.length &&
+                          selection.start != selection.end) {
+                        final selected = fullText.substring(
+                          selection.start,
+                          selection.end,
+                        );
+                        if (selected != _inlineSelectedText) {
+                          setState(() => _inlineSelectedText = selected);
+                        }
+                      } else if (_inlineSelectedText.isNotEmpty) {
+                        setState(() => _inlineSelectedText = '');
+                      }
+                    },
+                    contextMenuBuilder: (context, editableTextState) {
+                      final List<ContextMenuButtonItem> buttonItems =
+                          editableTextState.contextMenuButtonItems;
+                      return AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: editableTextState.contextMenuAnchors,
+                        buttonItems: buttonItems,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTerminalWidget(
+    TerminalSession session, {
+    bool isSecondary = false,
+    bool autoResize = true,
+  }) {
+    final terminalFontSize = ref.watch(settingsProvider).terminalFontSize;
+    final terminalThemeName = ref.watch(settingsProvider).terminalTheme;
+    final theme = _getTerminalTheme(terminalThemeName);
+    final isMobile =
+        Platform.isAndroid ||
+        Platform.isIOS ||
+        MediaQuery.sizeOf(context).width < 650;
+    final keyId = isSecondary ? '${session.id}_sec' : session.id;
+
+    if (!isSecondary) {
+      if (_lastAttachedSession != session) {
+        _lastAttachedSession = session;
+        _currentInput = '';
+        _suggestionsNotifier.value = null;
+        _attachTerminalOutputListener(session);
+      }
+
+      if (!_initializedSessions.contains(session)) {
+        _initializedSessions.add(session);
+      }
+    }
+
+    if (_inlineSelectionMode && !isSecondary) {
+      return _buildInlineSelectableTerminal(session, theme, terminalFontSize);
+    }
+
+    return Stack(
+      children: [
+        Column(
+          children: [
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: theme.background,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.03),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Actions(
+                  actions: <Type, Action<Intent>>{
+                    CopyTextIntent: CallbackAction<CopyTextIntent>(
+                      onInvoke: (intent) => _copySelection(session),
+                    ),
+                    PasteTextIntent: CallbackAction<PasteTextIntent>(
+                      onInvoke: (intent) => _pasteToTerminal(session),
+                    ),
+                    SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+                      onInvoke: (intent) => _selectAllInTerminal(session),
+                    ),
+                  },
+                  child: Shortcuts(
+                    shortcuts: <LogicalKeySet, Intent>{
+                      LogicalKeySet(
+                        LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyC,
+                      ): const CopyTextIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.meta,
+                        LogicalKeyboardKey.keyC,
+                      ): const CopyTextIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyV,
+                      ): const PasteTextIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.meta,
+                        LogicalKeyboardKey.keyV,
+                      ): const PasteTextIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyA,
+                      ): const SelectAllTextIntent(),
+                      LogicalKeySet(
+                        LogicalKeyboardKey.meta,
+                        LogicalKeyboardKey.keyA,
+                      ): const SelectAllTextIntent(),
+                    },
+                    child: ConduitTerminalSurface(
+                      key: _getTerminalKey(keyId),
+                      terminal: session.xtermTerminal,
+                      controller: session.xtermViewController,
+                      focusNode: _getFocusNode(keyId),
+                      autofocus: !isMobile,
+                      autoResize: autoResize,
+                      hardwareKeyboardOnly:
+                          ref.watch(settingsProvider).hardwareKeyboardMode,
+                      palette: resolveConduitPalette(
+                        ref.watch(settingsProvider).terminalTheme,
+                      ),
+                      brightness: Brightness.dark,
+                      customTheme: theme,
+                      fontFamily: _getFontFamily(
+                        ref.watch(settingsProvider).terminalFontFamily,
+                      ),
+                      fontSize: terminalFontSize,
+                      onFontSizeChanged: (newSize) {
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setTerminalFontSize(newSize.clamp(8.0, 26.0));
+                      },
+                      onSecondaryTapDown: (details, offset) {
+                        if (session.xtermViewController.selection != null) {
+                          _copySelection(session);
+                        } else {
+                          _pasteToTerminal(session);
+                        }
+                      },
+                      onTapUp: (details, offset) {
+                        final buffer = session.xtermTerminal.buffer;
+                        final link = QuantumLinkDetector.findLinkInBuffer(
+                          buffer,
+                          offset.y,
+                          offset.x,
+                        );
+                        if (link != null) {
+                          QuantumLinkDetector.handleLinkTap(
+                            context,
+                            ref,
+                            link,
+                          );
+                          return;
+                        }
+
+                        if (session.xtermViewController.selection != null) {
+                          session.xtermViewController.clearSelection();
+                          return;
+                        }
+
+                        _openTerminalKeyboard(
+                          session,
+                          isSecondary: isSecondary,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        _buildSuggestionBox(session),
+      ],
+    );
+  }
+
+  Widget _buildSuggestionBox(TerminalSession session) {
+    return ValueListenableBuilder<List<String>?>(
+      valueListenable: _suggestionsNotifier,
+      builder: (context, suggestions, _) {
+        if (suggestions == null || suggestions.isEmpty) {
+          _selectedSuggestionIndex = 0;
+          return const SizedBox.shrink();
+        }
+
+        return _SuggestionBox(
+          suggestions: suggestions,
+          selectedSuggestionIndex: _selectedSuggestionIndex,
+          session: session,
+          onAccept: _acceptSuggestion,
+        );
+      },
+    );
+  }
+
+  xt.TerminalTheme _getTerminalTheme(String themeName) {
+    for (final p in AppPalette.values) {
+      if (p.name == themeName) {
+        return p.terminalTheme;
+      }
+    }
+    if (themeName == 'ubuntu' || themeName == 'matrix' || themeName == 'dark') {
+      return resolveConduitPalette(themeName).terminalTheme;
+    }
+    return resolveConduitPalette(themeName).terminalTheme;
+  }
+
+  Widget _buildProblemsView(EditorState state) {
+    final workspacePath = ref.read(workspaceProvider).currentPath;
+    final allDiagnostics = <String, List<CodeDiagnostic>>{};
+    state.allDiagnostics.forEach((filePath, diags) {
+      if (workspacePath != null && filePath.startsWith(workspacePath)) {
+        allDiagnostics[filePath] = diags;
+      }
+    });
+
+    final totalErrors = allDiagnostics.values.fold<int>(
+      0,
+      (sum, diags) =>
+          sum +
+          diags.where((d) => d.severity == CodeDiagnosticSeverity.error).length,
+    );
+    final totalWarnings = allDiagnostics.values.fold<int>(
+      0,
+      (sum, diags) =>
+          sum +
+          diags
+              .where((d) => d.severity == CodeDiagnosticSeverity.warning)
+              .length,
+    );
+    final totalHints = allDiagnostics.values.fold<int>(
+      0,
+      (sum, diags) =>
+          sum +
+          diags.where((d) => d.severity == CodeDiagnosticSeverity.hint).length,
+    );
+    final totalProblems = totalErrors + totalWarnings + totalHints;
+
+    final l10n = AppLocalizations.of(context)!;
+
+    // Flatten and filter diagnostics into a sleek compact list
+    final flatEntries = <MapEntry<String, CodeDiagnostic>>[];
+    allDiagnostics.forEach((filePath, diags) {
+      for (final d in diags) {
+        if (_problemsSeverityFilter == 1 &&
+            d.severity != CodeDiagnosticSeverity.error)
+          continue;
+        if (_problemsSeverityFilter == 2 &&
+            d.severity != CodeDiagnosticSeverity.warning)
+          continue;
+        if (_problemsSeverityFilter == 3 &&
+            d.severity != CodeDiagnosticSeverity.hint)
+          continue;
+        flatEntries.add(MapEntry(filePath, d));
+      }
+    });
+
+    Widget buildFilterPill(
+      int index,
+      String label,
+      int count,
+      Color color,
+      IconData icon,
+    ) {
+      final isSelected = _problemsSeverityFilter == index;
+      return InkWell(
+        onTap: () => setState(() => _problemsSeverityFilter = index),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? color.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isSelected
+                  ? color.withValues(alpha: 0.5)
+                  : Colors.white.withValues(alpha: 0.07),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: isSelected ? color : Colors.white54),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 10.5,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? Colors.white : Colors.white60,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final headerWidget = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFF12151E),
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  buildFilterPill(
+                    0,
+                    'Все',
+                    totalProblems,
+                    Colors.cyanAccent,
+                    LucideIcons.list_filter,
+                  ),
+                  const SizedBox(width: 6),
+                  buildFilterPill(
+                    1,
+                    'Ошибки',
+                    totalErrors,
+                    Colors.redAccent,
+                    LucideIcons.circle_x,
+                  ),
+                  const SizedBox(width: 6),
+                  buildFilterPill(
+                    2,
+                    'Предупр.',
+                    totalWarnings,
+                    Colors.amberAccent,
+                    LucideIcons.triangle_alert,
+                  ),
+                  if (totalHints > 0) ...[
+                    const SizedBox(width: 6),
+                    buildFilterPill(
+                      3,
+                      'Инфо',
+                      totalHints,
+                      Colors.blueAccent,
+                      LucideIcons.info,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (flatEntries.isEmpty) {
+      return Column(
+        children: [
+          headerWidget,
+          Expanded(
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      LucideIcons.shield_check,
+                      color: Colors.greenAccent,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.noErrorsFound,
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        l10n.noErrorsDescription,
+                        style: GoogleFonts.inter(
+                          color: Colors.white38,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        headerWidget,
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            itemCount: flatEntries.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 3),
+            itemBuilder: (context, index) {
+              final entry = flatEntries[index];
+              return _buildDiagnosticTile(entry.key, entry.value);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDiagnosticTile(String path, CodeDiagnostic d) {
+    Color color;
+    IconData icon;
+    switch (d.severity) {
+      case CodeDiagnosticSeverity.error:
+        color = const Color(0xFFFF5555);
+        icon = LucideIcons.circle_x;
+        break;
+      case CodeDiagnosticSeverity.warning:
+        color = const Color(0xFFFFB86C);
+        icon = LucideIcons.triangle_alert;
+        break;
+      case CodeDiagnosticSeverity.hint:
+        color = const Color(0xFF58A6FF);
+        icon = LucideIcons.info;
+        break;
+    }
+
+    final fileName = path.split('/').last;
+    final lineNum = d.range.index + 1;
+    final colNum = d.range.start + 1;
+
+    return Material(
+      color: Colors.white.withValues(alpha: 0.02),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: () async {
+          await ref.read(editorProvider.notifier).openFile(path);
+        },
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border(left: BorderSide(color: color, width: 2.5)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 13),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  d.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 11.5,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '$fileName:$lineNum:$colNum',
+                  style: GoogleFonts.jetBrainsMono(
+                    color: Colors.cyanAccent.withValues(alpha: 0.85),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: () {
+                  Clipboard.setData(
+                    ClipboardData(
+                      text: '$fileName:$lineNum:$colNum - ${d.message}',
+                    ),
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Ошибка скопирована'),
+                      duration: Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(
+                    LucideIcons.copy,
+                    color: Colors.white38,
+                    size: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: () async {
+                  await ref.read(editorProvider.notifier).openFile(path);
+                  if (context.mounted) {
+                    final scaffold = Scaffold.maybeOf(context);
+                    if (MediaQuery.sizeOf(context).width < 768 &&
+                        scaffold != null &&
+                        scaffold.hasEndDrawer) {
+                      scaffold.openEndDrawer();
+                    } else {
+                      ref.read(panelProvider.notifier).closePanel();
+                      ref.read(rightAiPanelOpenProvider.notifier).state = true;
+                    }
+                  }
+                  final prompt =
+                      'Пожалуйста, исправь следующую ошибку в файле $fileName на строке $lineNum:\n'
+                      '```\n${d.message}\n```\n'
+                      'Файл: $path\n'
+                      'Изучи контекст и код вокруг строки $lineNum и примени исправление.';
+                  ref.read(roxumChatProvider.notifier).setChatMode(
+                        RoxumChatMode.agent,
+                      );
+                  await ref.read(roxumChatProvider.notifier).sendPrompt(prompt);
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: const Color(0xFF818CF8).withValues(alpha: 0.45),
+                      width: 0.7,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        LucideIcons.sparkles,
+                        color: Color(0xFFA5B4FC),
+                        size: 10,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        'AI Fix',
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFFE0E7FF),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ОБНОВЛЕННОЕ ХАКЕРСКОЕ КОНТЕКСТНОЕ МЕНЮ (Как в Termux)
+  void _showTerminalContextMenu(
+    BuildContext context,
+    Offset position,
+    TerminalSession session, {
+    bool fromToolbar = false,
+  }) async {
+    HapticFeedback.mediumImpact();
+    final isMobile = MediaQuery.sizeOf(context).width < 700;
+
+    if (isMobile || fromToolbar) {
+      _showMobileTerminalBottomSheet(context, session);
+      return;
+    }
+
+    final RenderBox overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final hasSelection = session.xtermViewController.selection != null;
+    final l10n = AppLocalizations.of(context)!;
+
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy - 60,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      color: const Color(0xFF1E2230),
+      elevation: 12,
+      useRootNavigator: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'inline_selection',
+          height: 38,
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.mouse_pointer_click,
+                size: 15,
+                color: Colors.cyanAccent,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                l10n.selectTextInTerminal,
+                style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        if (hasSelection)
+          PopupMenuItem(
+            value: 'copy',
+            height: 38,
+            child: Row(
+              children: [
+                const Icon(LucideIcons.copy, size: 15, color: Colors.white70),
+                const SizedBox(width: 10),
+                Text(
+                  l10n.copy,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        PopupMenuItem(
+          value: 'copy_all',
+          height: 38,
+          child: Row(
+            children: [
+              const Icon(LucideIcons.files, size: 15, color: Colors.white70),
+              const SizedBox(width: 10),
+              Text(
+                l10n.copyAll,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'paste',
+          height: 38,
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.clipboard_paste,
+                size: 15,
+                color: Colors.white70,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                l10n.paste,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'split',
+          height: 38,
+          child: Row(
+            children: [
+              Icon(
+                _isTerminalSplit ? LucideIcons.square : LucideIcons.columns_2,
+                size: 15,
+                color: Colors.cyanAccent,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _isTerminalSplit ? l10n.mergeScreen : l10n.splitScreen,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'wakelock',
+          height: 38,
+          child: Row(
+            children: [
+              Icon(
+                LucideIcons.coffee,
+                size: 15,
+                color: _isWakelockEnabled
+                    ? Colors.orangeAccent
+                    : Colors.white70,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _isWakelockEnabled
+                    ? l10n.keepScreenOnActive
+                    : l10n.keepScreenOn,
+                style: TextStyle(
+                  color: _isWakelockEnabled
+                      ? Colors.orangeAccent
+                      : Colors.white,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(height: 1),
+        PopupMenuItem(
+          value: 'ctrl_c',
+          height: 38,
+          child: Row(
+            children: [
+              const Icon(LucideIcons.square, size: 15, color: Colors.redAccent),
+              const SizedBox(width: 10),
+              Text(
+                l10n.interruptProcess,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'clear',
+          height: 38,
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.trash_2,
+                size: 15,
+                color: Colors.orangeAccent,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                l10n.clearTerminal,
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (!mounted || !context.mounted) return;
+
+    if (result == 'inline_selection') {
+      _toggleInlineSelectionMode(session);
+    } else if (result == 'selection_mode') {
+      _selectAllInTerminal(session);
+    } else if (result == 'copy') {
+      final selectedText = session.xtermViewController.selection != null
+          ? session.xtermTerminal.buffer.getText(
+              session.xtermViewController.selection!,
+            )
+          : '';
+      if (selectedText.isNotEmpty) {
+        final messenger = ScaffoldMessenger.of(context);
+        final copiedMsg = AppLocalizations.of(context)!.copiedToClipboard;
+        await Clipboard.setData(ClipboardData(text: selectedText));
+        if (mounted && context.mounted) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(copiedMsg),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 1),
+            ),
+          );
+        }
+      }
+      session.xtermViewController.clearSelection();
+    } else if (result == 'copy_all') {
+      _copyTerminalOutputDirect(session);
+    } else if (result == 'paste') {
+      _pasteToTerminal(session);
+    } else if (result == 'ctrl_c') {
+      session.pty.write(Uint8List.fromList([3]));
+    } else if (result == 'clear') {
+      session.xtermTerminal.eraseDisplay();
+      session.xtermTerminal.eraseScrollbackOnly();
+    } else if (result == 'split') {
+      setState(() {
+        _isTerminalSplit = !_isTerminalSplit;
+        final sessions = ref.read(terminalTabsProvider);
+        if (_isTerminalSplit && sessions.length < 2) {
+          ref.read(terminalTabsProvider.notifier).createNewSession();
+        }
+      });
+    } else if (result == 'wakelock') {
+      _toggleWakelock();
+    }
+  }
+
+  void _showMobileTerminalBottomSheet(
+    BuildContext context,
+    TerminalSession session,
+  ) {
+    final l10n = AppLocalizations.of(context)!;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.only(top: 8, bottom: 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF131722),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: session.isExited
+                              ? Colors.redAccent
+                              : Colors.greenAccent,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        session.title,
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(
+                          LucideIcons.x,
+                          size: 16,
+                          color: Colors.white54,
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 12, color: Colors.white10),
+                _buildMenuTile(
+                  icon: LucideIcons.mouse_pointer_click,
+                  iconColor: Colors.cyanAccent,
+                  title: _inlineSelectionMode
+                      ? l10n.closeSelection
+                      : l10n.selectTextInTerminal,
+                  subtitle: l10n.selectTextInTerminal,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _toggleInlineSelectionMode(session);
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.copy,
+                  iconColor: Colors.greenAccent,
+                  title: l10n.copyAll,
+                  subtitle: l10n.copyAll,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _copyTerminalOutputDirect(session);
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.clipboard_paste,
+                  iconColor: Colors.blueAccent,
+                  title: l10n.paste,
+                  subtitle: l10n.paste,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pasteToTerminal(session);
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.square,
+                  iconColor: Colors.redAccent,
+                  title: l10n.interruptProcess,
+                  subtitle: l10n.interruptProcess,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    session.pty.write(Uint8List.fromList([3]));
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.trash_2,
+                  iconColor: Colors.orangeAccent,
+                  title: l10n.clearTerminal,
+                  subtitle: l10n.clearTerminal,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    session.xtermTerminal.eraseDisplay();
+                    session.xtermTerminal.eraseScrollbackOnly();
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.refresh_cw,
+                  iconColor: Colors.purpleAccent,
+                  title: l10n.newSession,
+                  subtitle: session.title,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    final tabsNotifier = ref.read(
+                      terminalTabsProvider.notifier,
+                    );
+                    final idx = ref.read(terminalTabsProvider).indexOf(session);
+                    if (idx != -1) {
+                      tabsNotifier.restartSession(idx);
+                    }
+                  },
+                ),
+                _buildMenuTile(
+                  icon: _isTerminalSplit
+                      ? LucideIcons.square
+                      : LucideIcons.columns_2,
+                  iconColor: Colors.cyanAccent,
+                  title: _isTerminalSplit ? l10n.mergeScreen : l10n.splitScreen,
+                  subtitle: l10n.splitScreen,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _isTerminalSplit = !_isTerminalSplit;
+                      final sessions = ref.read(terminalTabsProvider);
+                      if (_isTerminalSplit && sessions.length < 2) {
+                        ref
+                            .read(terminalTabsProvider.notifier)
+                            .createNewSession();
+                      }
+                    });
+                  },
+                ),
+                _buildMenuTile(
+                  icon: LucideIcons.coffee,
+                  iconColor: _isWakelockEnabled
+                      ? Colors.orangeAccent
+                      : Colors.white60,
+                  title: _isWakelockEnabled
+                      ? l10n.keepScreenOnActive
+                      : l10n.keepScreenOn,
+                  subtitle: l10n.keepScreenOn,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _toggleWakelock();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 16, color: iconColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.inter(
+                        color: Colors.white38,
+                        fontSize: 9.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                LucideIcons.chevron_right,
+                size: 14,
+                color: Colors.white24,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPluginCommandsBar(TerminalSession session) {
+    final pluginService = ref.watch(quantumPluginServiceProvider);
+    final cmds = pluginService.activeTerminalCommands;
+    if (cmds.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      height: 26,
+      decoration: const BoxDecoration(
+        color: Color(0xFF11141C),
+        border: Border(
+          top: BorderSide(color: Color(0xFF202636), width: 0.6),
+          bottom: BorderSide(color: Color(0xFF161A26), width: 0.6),
+        ),
+      ),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        itemCount: cmds.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 5),
+        itemBuilder: (context, index) {
+          final item = cmds[index];
+          return InkWell(
+            onTap: () {
+              session.pty.write(
+                Uint8List.fromList(utf8.encode('${item.command}\n')),
+              );
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1F2C),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  width: 0.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    LucideIcons.terminal,
+                    size: 10,
+                    color: Color(0xFF4FC3F7),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    item.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w500,
+                      fontFamily: 'JetBrainsMono',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildVirtualKeys(
+    List<TerminalSession> sessions,
+    TerminalTabsNotifier notifier,
+  ) {
+    if (sessions.isEmpty || notifier.currentIndex >= sessions.length) {
+      return const SizedBox();
+    }
+    final currentSession = sessions[notifier.currentIndex];
+    final themeName = ref.watch(settingsProvider).terminalTheme;
+    final palette = resolveConduitPalette(themeName);
+    final keyId = currentSession.id;
+
+    return ConduitKeyboardBar(
+      terminal: currentSession.xtermTerminal,
+      keyboardController: currentSession.keyboardController,
+      focusNode: _getFocusNode(keyId),
+      palette: palette,
+      brightness: Brightness.dark,
+      fullscreen: ref.watch(panelProvider).isMaximized,
+      onToggleFullscreen: widget.onlyTerminal
+          ? null
+          : () {
+              ref.read(panelProvider.notifier).toggleMaximized();
+            },
+      onToggleKeyboard: () {
+        final node = _getFocusNode(keyId);
+        if (node.hasFocus) {
+          node.unfocus();
+        } else {
+          node.requestFocus();
+        }
+      },
+      onPaste: () => _pasteToTerminal(currentSession),
+    );
+  }
+
+  static final Map<String, String> _fontCache = {};
+
+  String _getFontFamily(String fontName) {
+    if (_fontCache.containsKey(fontName)) return _fontCache[fontName]!;
+    final normalized = fontName.toLowerCase().replaceAll(' ', '');
+    String result;
+    switch (normalized) {
+      case 'jetbrainsmono':
+        result = 'jetBrainsMono';
+        break;
+      case 'firacode':
+        result = 'firaCode';
+        break;
+      case 'sourcecodepro':
+        result = 'sourceCodePro';
+        break;
+      case 'inconsolata':
+        result = 'inconsolata';
+        break;
+      case 'cascadiacode':
+      case 'cascadia':
+        result = 'cascadia';
+        break;
+      case 'symbolsnerdfont':
+      case 'nerdfont':
+      case 'symbolsnerd':
+        result = 'SymbolsNerdFont';
+        break;
+      case 'monospace':
+        result = 'monospace';
+        break;
+      default:
+        try {
+          result = GoogleFonts.getFont(fontName).fontFamily ?? 'monospace';
+        } catch (_) {
+          result = 'monospace';
+        }
+    }
+    _fontCache[fontName] = result;
+    return result;
+  }
+
+  Future<void> _copySelection(TerminalSession session) async {
+    final selection = session.xtermViewController.selection;
+    String text = '';
+    bool hasSel = false;
+    if (selection != null) {
+      text = session.xtermTerminal.buffer.getText(selection);
+      session.xtermViewController.clearSelection();
+      hasSel = true;
+    } else {
+      text = _extractTerminalText(session.xtermTerminal);
+    }
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              hasSel
+                  ? AppLocalizations.of(context)!.copiedToClipboard
+                  : AppLocalizations.of(context)!.copyAll,
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _pasteToTerminal(TerminalSession session) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text != null && text.isNotEmpty) {
+      final sanitized = _sanitizeTerminalInput(
+        text,
+      ).replaceAll(RegExp(r'[\r\n]+$'), '');
+      if (sanitized.isEmpty) return;
+      if (session.xtermTerminal.bracketedPasteMode) {
+        session.xtermTerminal.paste(sanitized);
+      } else {
+        session.pty.write(Uint8List.fromList(utf8.encode(sanitized)));
+      }
+    }
+  }
+
+  void _selectAllInTerminal(TerminalSession session) {
+    final buffer = session.xtermTerminal.buffer;
+    if (buffer.height == 0) return;
+    final firstLine = buffer.lines[0];
+    final lastLine = buffer.lines[buffer.height - 1];
+    final base = xt.CellAnchor(0, owner: firstLine);
+    final extent = xt.CellAnchor(lastLine.length, owner: lastLine);
+    session.xtermViewController.setSelection(base, extent);
+  }
+}
+
+class _SuggestionBox extends StatefulWidget {
+  final List<String> suggestions;
+  final int selectedSuggestionIndex;
+  final TerminalSession session;
+  final Function(TerminalSession, String) onAccept;
+
+  const _SuggestionBox({
+    required this.suggestions,
+    required this.selectedSuggestionIndex,
+    required this.session,
+    required this.onAccept,
+  });
+
+  @override
+  State<_SuggestionBox> createState() => _SuggestionBoxState();
+}
+
+class _SuggestionBoxState extends State<_SuggestionBox> {
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const itemHeight = 36.0;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final isKeyboardOpen = bottomInset > 20;
+    final maxHeight = (widget.suggestions.length * itemHeight).clamp(
+      0.0,
+      isKeyboardOpen ? 95.0 : 180.0,
+    );
+
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          height: maxHeight,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E24).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: RawScrollbar(
+            thumbVisibility: true,
+            thumbColor: Colors.white.withValues(alpha: 0.15),
+            controller: _scrollController,
+            child: ListView.builder(
+              controller: _scrollController,
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemExtent: itemHeight,
+              itemCount: widget.suggestions.length,
+              itemBuilder: (context, index) {
+                final suggestion = widget.suggestions[index];
+                final isSelected = index == widget.selectedSuggestionIndex;
+                final isDirectory = suggestion.endsWith('/');
+                final isPath = suggestion.contains('/');
+
+                return InkWell(
+                  onTap: () => widget.onAccept(widget.session, suggestion),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    color: isSelected
+                        ? Colors.cyanAccent.withValues(alpha: 0.15)
+                        : Colors.transparent,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: isDirectory
+                                ? Colors.amber.withValues(alpha: 0.1)
+                                : isPath
+                                ? Colors.blueAccent.withValues(alpha: 0.1)
+                                : Colors.greenAccent.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Icon(
+                            isDirectory
+                                ? LucideIcons.folder
+                                : isPath
+                                ? LucideIcons.file
+                                : LucideIcons.terminal,
+                            size: 12,
+                            color: isDirectory
+                                ? Colors.amber
+                                : isPath
+                                ? Colors.blueAccent
+                                : Colors.greenAccent,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            suggestion,
+                            style: GoogleFonts.jetBrainsMono(
+                              color: isSelected
+                                  ? Colors.cyanAccent
+                                  : Colors.white70,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (!isPath)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.greenAccent.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'cmd',
+                              style: GoogleFonts.inter(
+                                color: Colors.greenAccent,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        if (isDirectory)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'dir',
+                              style: GoogleFonts.inter(
+                                color: Colors.amber,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        if (isPath && !isDirectory)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'file',
+                              style: GoogleFonts.inter(
+                                color: Colors.blueAccent,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CollapsibleConsole extends StatefulWidget {
+  final String content;
+  const CollapsibleConsole({super.key, required this.content});
+
+  @override
+  State<CollapsibleConsole> createState() => _CollapsibleConsoleState();
+}
+
+class _CollapsibleConsoleState extends State<CollapsibleConsole> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _isExpanded = !_isExpanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                children: [
+                  const Icon(
+                    LucideIcons.terminal,
+                    size: 12,
+                    color: Colors.white54,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Console Log',
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: 10,
+                      color: Colors.white54,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _isExpanded
+                        ? LucideIcons.chevron_up
+                        : LucideIcons.chevron_down,
+                    size: 12,
+                    color: Colors.white54,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_isExpanded)
+            Container(
+              padding: const EdgeInsets.all(10),
+              color: Colors.black26,
+              child: SelectableText(
+                widget.content.trim(),
+                style: GoogleFonts.jetBrainsMono(
+                  color: Colors.white70,
+                  fontSize: 10.5,
+                  height: 1.4,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

@@ -1,0 +1,16 @@
+gradle-wrapper.jar
+/.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Keystore configuration
+# Allow project release key so all team builds and updates share the signature
+!release-key.jks
+!app/release-key.jks
+!key.properties
+!keystore.properties
+

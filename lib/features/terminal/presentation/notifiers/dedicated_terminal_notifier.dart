@@ -1,0 +1,360 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:quantum_ide/core/services/pty/pty_facade.dart';
+import 'package:uuid/uuid.dart';
+import 'package:path/path.dart' as p;
+import 'package:conduit_vt/conduit_vt.dart' as xt;
+
+import '../../../../core/services/runtime_service.dart';
+import '../../../../core/services/workspace_service.dart';
+import '../../../../core/services/live_telemetry_service.dart';
+import 'terminal_tabs_notifier.dart';
+import '../../engine/terminal_output_pipe.dart';
+import '../../../../core/services/build_progress_tracker.dart';
+
+enum DedicatedTerminalType { run, build, appLogs }
+
+class DedicatedTerminalState {
+  final Map<DedicatedTerminalType, TerminalSession?> sessions;
+
+  DedicatedTerminalState({this.sessions = const {}});
+
+  DedicatedTerminalState copyWith({
+    Map<DedicatedTerminalType, TerminalSession?>? sessions,
+  }) {
+    return DedicatedTerminalState(sessions: sessions ?? this.sessions);
+  }
+}
+
+class DedicatedTerminalNotifier extends StateNotifier<DedicatedTerminalState> {
+  final Ref _ref;
+
+  DedicatedTerminalNotifier(this._ref) : super(DedicatedTerminalState());
+
+  void sendCommand(
+    DedicatedTerminalType type,
+    String command, {
+    bool interrupt = false,
+    bool clear = false,
+  }) {
+    final session = state.sessions[type];
+
+    if (session == null || session.isExited) {
+      _createSession(type);
+      // Wait more for session to initialize (init-host takes time)
+      Future.delayed(const Duration(seconds: 2), () {
+        _sendToSession(
+          type,
+          command,
+          false,
+          clear: clear,
+        ); // No interrupt on first command
+      });
+    } else {
+      _sendToSession(type, command, interrupt, clear: clear);
+    }
+  }
+
+  void sendRawChar(DedicatedTerminalType type, String char) {
+    if (char == '\x03') {
+      BuildProgressTracker.instance.cancel();
+      if (LiveTelemetryService.instance.isBuilding) {
+        LiveTelemetryService.instance.onBuildFinished(-1);
+      }
+    }
+    final session = state.sessions[type];
+    if (session == null || session.isExited) return;
+
+    session.pty.write(Uint8List.fromList(utf8.encode(char)));
+  }
+
+  void stopBuildProcess() {
+    BuildProgressTracker.instance.cancel();
+    if (LiveTelemetryService.instance.isBuilding) {
+      LiveTelemetryService.instance.onBuildFinished(-1);
+    }
+    final session = state.sessions[DedicatedTerminalType.build];
+    if (session != null && !session.isExited) {
+      session.pty.write(Uint8List.fromList([3]));
+      Future.delayed(const Duration(milliseconds: 120), () {
+        session.pty.write(
+          Uint8List.fromList(
+            utf8.encode(
+              '\x03(pkill -9 -f gen_snapshot 2>/dev/null || true); (pkill -9 -f GradleDaemon 2>/dev/null || true); (pkill -9 -f GradleWrapperMain 2>/dev/null || true); (pkill -9 -f aapt2 2>/dev/null || true); echo "✗ Сборка отменена пользователем"\n',
+            ),
+          ),
+        );
+      });
+    }
+  }
+
+  void _sendToSession(
+    DedicatedTerminalType type,
+    String command,
+    bool interrupt, {
+    bool clear = false,
+  }) {
+    final session = state.sessions[type];
+    if (session == null) return;
+
+    if (clear) {
+      clearTerminal(type);
+    }
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    String translatedCommand = command;
+    if (Platform.isAndroid || Platform.isIOS) {
+      final hostProjectsPath = p.join(runtime.appDirectory, 'projects');
+      if (translatedCommand.contains(hostProjectsPath)) {
+        translatedCommand = translatedCommand.replaceAll(
+          hostProjectsPath,
+          '/root/projects',
+        );
+      }
+      if (translatedCommand.contains('/storage/emulated/0')) {
+        translatedCommand = translatedCommand.replaceAll(
+          '/storage/emulated/0',
+          '/sdcard',
+        );
+      }
+    }
+
+    final lowerCmd = command.toLowerCase();
+    final isBuildCmd = type == DedicatedTerminalType.build ||
+        lowerCmd.contains('flutter build') ||
+        lowerCmd.contains('gradlew') ||
+        lowerCmd.contains('assembledebug') ||
+        lowerCmd.contains('assemblerelease') ||
+        lowerCmd.contains('appbundle');
+    if (isBuildCmd) {
+      LiveTelemetryService.instance.onBuildStarted(command);
+    }
+
+    if (interrupt) {
+      session.pty.write(Uint8List.fromList([3]));
+      Future.delayed(const Duration(milliseconds: 100), () {
+        session.pty.write(
+          Uint8List.fromList(utf8.encode('$translatedCommand\n')),
+        );
+      });
+    } else {
+      session.pty.write(
+        Uint8List.fromList(utf8.encode('$translatedCommand\n')),
+      );
+    }
+  }
+
+  void _createSession(DedicatedTerminalType type) {
+    final runtime = _ref.read(runtimeServiceProvider);
+    final workspace = _ref.read(workspaceProvider);
+
+    final id = const Uuid().v4();
+    final title = type.toString().split('.').last.toUpperCase();
+
+    try {
+      String dir = workspace.currentPath ?? runtime.workingDirectory;
+      if ((Platform.isAndroid || Platform.isIOS) && dir.contains('/storage/emulated/0')) {
+        dir = dir.replaceAll('/storage/emulated/0', '/sdcard');
+      }
+      final env = Map<String, String>.from(runtime.env);
+
+      final sessionTmpDir = p.join(
+        runtime.appDirectory,
+        'runtime',
+        'tmp',
+        'dedicated_${type.index}_$id',
+      );
+      if (Directory(sessionTmpDir).existsSync()) {
+        Directory(sessionTmpDir).deleteSync(recursive: true);
+      }
+      Directory(sessionTmpDir).createSync(recursive: true);
+
+      env['PROOT_TMP_DIR'] = sessionTmpDir;
+      env.remove('PROOT_NO_SECCOMP');
+      env.remove('LD_PRELOAD');
+      env['PWD'] = dir;
+      final has256Terminfo = !Platform.isAndroid ||
+          File(p.join(runtime.appDirectory, 'rootfs', 'ubuntu', 'usr', 'share', 'terminfo', 'x', 'xterm-256color')).existsSync() ||
+          File(p.join(runtime.appDirectory, 'rootfs', 'ubuntu', 'lib', 'terminfo', 'x', 'xterm-256color')).existsSync();
+
+      env['TERM'] = has256Terminfo ? 'xterm-256color' : 'xterm';
+      env['COLORTERM'] = 'truecolor';
+      env['LANG'] = env['LANG'] ?? 'C.UTF-8';
+      env['LC_ALL'] = env['LC_ALL'] ?? 'C.UTF-8';
+
+      final shell = Platform.isAndroid
+          ? '/system/bin/sh'
+          : (Platform.isWindows ? 'cmd.exe' : (Platform.environment['SHELL'] ?? 'bash'));
+      final List<String> args = Platform.isAndroid
+          ? [runtime.prootCommand, runtime.appDirectory]
+          : Platform.isWindows
+          ? []
+          : ['-i'];
+
+      final pty = Pty.start(
+        shell,
+        arguments: args,
+        environment: env,
+        workingDirectory: Platform.isAndroid ? runtime.appDirectory : dir,
+      );
+
+      final xtermVc = xt.TerminalController();
+      int lastCols = -1;
+      int lastRows = -1;
+      Timer? resizeDebounce;
+      final xtermTerm = xt.Terminal(
+        maxLines: 10000,
+        platform: Platform.isAndroid
+            ? xt.TerminalTargetPlatform.android
+            : (Platform.isIOS
+                ? xt.TerminalTargetPlatform.ios
+                : (Platform.isMacOS
+                    ? xt.TerminalTargetPlatform.macos
+                    : (Platform.isWindows
+                        ? xt.TerminalTargetPlatform.windows
+                        : xt.TerminalTargetPlatform.linux))),
+        onOutput: (data) {
+          pty.write(Uint8List.fromList(utf8.encode(data)));
+        },
+        onResize: (cols, rows, int pixelWidth, int pixelHeight) {
+          final safeRows = rows < 6 ? 6 : rows;
+          final safeCols = cols < 20 ? 20 : cols;
+          if (lastRows == -1 && lastCols == -1) {
+            lastRows = safeRows;
+            lastCols = safeCols;
+            try {
+              pty.resize(safeRows, safeCols);
+            } catch (_) {}
+            return;
+          }
+          resizeDebounce?.cancel();
+          resizeDebounce = Timer(const Duration(milliseconds: 180), () {
+            if (safeRows != lastRows || safeCols != lastCols) {
+              lastRows = safeRows;
+              lastCols = safeCols;
+              try {
+                pty.resize(safeRows, safeCols);
+              } catch (_) {}
+            }
+          });
+        },
+      );
+      // ptyOutSub is stored in TerminalSession
+      // and cancelled in dispose() via session.ptyOutSubscription?.cancel()
+      // ignore: cancel_subscriptions
+      final ptyOutSub = pty.output
+          .cast<List<int>>()
+          .transform(terminalOutputTransformer())
+          .listen(
+        (text) {
+          if (text.isEmpty) return;
+          try {
+            xtermTerm.write(text);
+          } catch (_) {
+            // Never re-write chunk on error to avoid duplicate words.
+          }
+          BuildProgressTracker.instance.feed(text);
+          if (type == DedicatedTerminalType.build || LiveTelemetryService.instance.isBuilding) {
+            LiveTelemetryService.instance.appendBuildOutput(text);
+            if (text.contains('✓ Built build/app/outputs/') ||
+                text.contains('✓ Built build/web') ||
+                text.contains('Built build/web') ||
+                text.contains('✓ APK готов:') ||
+                text.contains('✓ Debug APK готов:') ||
+                text.contains('✓ AppBundle готов:') ||
+                text.contains('✓ Release APK:') ||
+                text.contains('✓ Debug APK:') ||
+                text.contains('BUILD SUCCESSFUL')) {
+              LiveTelemetryService.instance.onBuildFinished(0);
+            } else if (text.contains('BUILD FAILED') ||
+                text.contains('✗ Сборка завершилась с кодом') ||
+                text.contains('Gradle task assembleRelease failed') ||
+                text.contains('Gradle task assembleDebug failed')) {
+              LiveTelemetryService.instance.onBuildFinished(1);
+            }
+          }
+        },
+        onDone: () {
+          resizeDebounce?.cancel();
+          _markAsExited(type);
+          if (type == DedicatedTerminalType.build || LiveTelemetryService.instance.isBuilding) {
+            if (LiveTelemetryService.instance.isBuilding) {
+              xtermTerm.write(
+                '\r\n\x1b[1;33m[Сессия терминала перезапущена — нажмите кнопку сборки повторно]\x1b[0m\r\n',
+              );
+              LiveTelemetryService.instance.onBuildFinished(-1);
+            }
+          }
+        },
+      );
+
+      final session = TerminalSession(
+        id: id,
+        title: title,
+        pty: pty,
+        workingDir: dir,
+        xtermTerminal: xtermTerm,
+        xtermViewController: xtermVc,
+        ptyOutSubscription: ptyOutSub,
+      );
+
+      final newSessions = Map<DedicatedTerminalType, TerminalSession?>.from(
+        state.sessions,
+      );
+      newSessions[type] = session;
+      state = state.copyWith(sessions: newSessions);
+    } catch (e) {
+      debugPrint('Failed to start dedicated terminal $type: $e');
+    }
+  }
+
+  void _markAsExited(DedicatedTerminalType type) {
+    final session = state.sessions[type];
+    if (session == null) return;
+
+    final newSessions = Map<DedicatedTerminalType, TerminalSession?>.from(
+      state.sessions,
+    );
+    newSessions[type] = TerminalSession(
+      id: session.id,
+      title: session.title,
+      pty: session.pty,
+      workingDir: session.workingDir,
+      xtermTerminal: session.xtermTerminal,
+      xtermViewController: session.xtermViewController,
+      ptyOutSubscription: session.ptyOutSubscription,
+      isExited: true,
+    );
+    state = state.copyWith(sessions: newSessions);
+  }
+
+  void clearTerminal(DedicatedTerminalType type) {
+    final session = state.sessions[type];
+    if (session == null) return;
+
+    session.xtermTerminal.eraseDisplay();
+    session.xtermTerminal.eraseScrollbackOnly();
+  }
+
+  @override
+  void dispose() {
+    for (final session in state.sessions.values) {
+      session?.ptyOutSubscription?.cancel();
+      try {
+        session?.pty.kill();
+      } catch (_) {}
+    }
+    super.dispose();
+  }
+}
+
+final dedicatedTerminalProvider =
+    StateNotifierProvider<DedicatedTerminalNotifier, DedicatedTerminalState>((
+      ref,
+    ) {
+      return DedicatedTerminalNotifier(ref);
+    });

@@ -1,0 +1,1938 @@
+import 'package:quantum_ide/core/utils/path_mapper.dart';
+import 'package:quantum_ide/core/utils/platform_utils.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+import '../../models/project_model.dart';
+import '../services/runtime_service.dart';
+import '../services/workspace_service.dart';
+import '../../features/terminal/presentation/notifiers/terminal_tabs_notifier.dart';
+import '../services/build_resource_optimizer.dart';
+import '../services/talker_service.dart';
+
+class SdCardExportResult {
+  final int projectCount;
+  final int copiedFiles;
+  final int skippedFiles;
+  final int copiedApks;
+  final String destinationPath;
+  final String? errorMessage;
+
+  const SdCardExportResult({
+    required this.projectCount,
+    required this.copiedFiles,
+    required this.skippedFiles,
+    required this.copiedApks,
+    required this.destinationPath,
+    this.errorMessage,
+  });
+
+  bool get isSuccess => errorMessage == null;
+}
+
+class ProjectService extends StateNotifier<List<Project>> {
+  final Ref _ref;
+  static const _externalPath = '/storage/emulated/0/QuantumIDE';
+  static const Set<String> _sdExportSkipDirs = {
+    '.git',
+    '.dart_tool',
+    '.idea',
+    '.gradle',
+    'build',
+    'node_modules',
+    'local_plugins',
+    '.quantum',
+    '.cxx',
+    '.widget_preview',
+    'external',
+  };
+
+  ProjectService(Ref ref) : _ref = ref, super([]) {
+    _loadAndScanProjects();
+  }
+
+  static const _key = 'user_projects';
+
+  Future<String?> _ensureSdCardPermission() async {
+    if (!Platform.isAndroid) {
+      return 'Экспорт на SD-карту доступен только на Android';
+    }
+    var status = await Permission.manageExternalStorage.status;
+    if (!status.isGranted) {
+      status = await Permission.manageExternalStorage.request();
+    }
+    if (!status.isGranted) {
+      return 'Нет разрешения на доступ к памяти устройства';
+    }
+    return null;
+  }
+
+  Future<SdCardExportResult> exportProjectToSdCard(Project project) async {
+    final permissionError = await _ensureSdCardPermission();
+    if (permissionError != null) {
+      return SdCardExportResult(
+        projectCount: 0,
+        copiedFiles: 0,
+        skippedFiles: 0,
+        copiedApks: 0,
+        destinationPath: p.join(_externalPath, project.name),
+        errorMessage: permissionError,
+      );
+    }
+
+    final result = await _exportSingleProjectToSdCard(project);
+    if (result.isSuccess) {
+      TalkerService.info(
+        'SD export [${project.name}]: copied=${result.copiedFiles}, skipped=${result.skippedFiles}, apks=${result.copiedApks} -> ${result.destinationPath}',
+      );
+    } else {
+      TalkerService.error('SD export failed [${project.name}]: ${result.errorMessage}');
+    }
+    return result;
+  }
+
+  Future<SdCardExportResult> exportAllProjectsToSdCard({
+    void Function(int done, int total, String currentName)? onProgress,
+  }) async {
+    final permissionError = await _ensureSdCardPermission();
+    if (permissionError != null) {
+      return SdCardExportResult(
+        projectCount: 0,
+        copiedFiles: 0,
+        skippedFiles: 0,
+        copiedApks: 0,
+        destinationPath: _externalPath,
+        errorMessage: permissionError,
+      );
+    }
+
+    final internalProjects = state.where((proj) => proj.isInternal).toList();
+    final total = internalProjects.length;
+    int exportedProjects = 0;
+    int totalCopied = 0;
+    int totalSkipped = 0;
+    int totalApks = 0;
+    String? lastError;
+
+    for (int i = 0; i < total; i++) {
+      final project = internalProjects[i];
+      onProgress?.call(i, total, project.name);
+      final res = await _exportSingleProjectToSdCard(project);
+      if (res.isSuccess) {
+        exportedProjects++;
+        totalCopied += res.copiedFiles;
+        totalSkipped += res.skippedFiles;
+        totalApks += res.copiedApks;
+      } else {
+        lastError = res.errorMessage;
+      }
+      onProgress?.call(i + 1, total, project.name);
+    }
+
+    final summary = SdCardExportResult(
+      projectCount: exportedProjects,
+      copiedFiles: totalCopied,
+      skippedFiles: totalSkipped,
+      copiedApks: totalApks,
+      destinationPath: _externalPath,
+      errorMessage: exportedProjects == 0 && lastError != null ? lastError : null,
+    );
+
+    if (summary.isSuccess) {
+      TalkerService.info(
+        'SD export all: projects=${summary.projectCount}/$total, copied=${summary.copiedFiles}, skipped=${summary.skippedFiles}, apks=${summary.copiedApks} -> $_externalPath',
+      );
+    } else {
+      TalkerService.error('SD export all failed: ${summary.errorMessage}');
+    }
+    return summary;
+  }
+
+  Future<SdCardExportResult> _exportSingleProjectToSdCard(Project project) async {
+    final destRoot = p.join(_externalPath, project.name);
+    final sourceDir = Directory(project.path);
+    if (!await sourceDir.exists()) {
+      return SdCardExportResult(
+        projectCount: 0,
+        copiedFiles: 0,
+        skippedFiles: 0,
+        copiedApks: 0,
+        destinationPath: destRoot,
+        errorMessage: 'Папка проекта не найдена: ${project.path}',
+      );
+    }
+
+    int copiedFiles = 0;
+    int skippedFiles = 0;
+    int copiedApks = 0;
+
+    try {
+      final destDir = Directory(destRoot);
+      if (!await destDir.exists()) {
+        await destDir.create(recursive: true);
+      }
+
+      Future<void> copyDirIncremental(Directory src, Directory dst) async {
+        if (!await dst.exists()) {
+          await dst.create(recursive: true);
+        }
+        await for (final entity in src.list(recursive: false, followLinks: false)) {
+          if (await FileSystemEntity.isLink(entity.path)) continue;
+          final name = p.basename(entity.path);
+          if (entity is Directory) {
+            if (_sdExportSkipDirs.contains(name)) continue;
+            await copyDirIncremental(entity, Directory(p.join(dst.path, name)));
+          } else if (entity is File) {
+            final destPath = p.join(dst.path, name);
+            final destFile = File(destPath);
+            try {
+              final srcStat = await entity.stat();
+              bool shouldCopy = !await destFile.exists();
+              if (!shouldCopy) {
+                final destStat = await destFile.stat();
+                if (srcStat.size != destStat.size ||
+                    srcStat.modified.isAfter(
+                      destStat.modified.add(const Duration(seconds: 1)),
+                    )) {
+                  shouldCopy = true;
+                }
+              }
+              if (shouldCopy) {
+                await entity.copy(destPath);
+                try {
+                  await destFile.setLastModified(srcStat.modified);
+                } catch (_) {}
+                copiedFiles++;
+              } else {
+                skippedFiles++;
+              }
+            } catch (_) {
+              skippedFiles++;
+            }
+          }
+        }
+      }
+
+      await copyDirIncremental(sourceDir, destDir);
+
+      // Copy built .apk artifacts into <destRoot>/apk/
+      final apkSearchDirs = [
+        Directory(p.join(project.path, 'build')),
+        Directory(p.join(project.path, 'app', 'build')),
+      ];
+      final apkDestDir = Directory(p.join(destRoot, 'apk'));
+      for (final buildDir in apkSearchDirs) {
+        if (!await buildDir.exists()) continue;
+        try {
+          await for (final entity in buildDir.list(recursive: true, followLinks: false)) {
+            if (entity is! File) continue;
+            if (!entity.path.toLowerCase().endsWith('.apk')) continue;
+            if (await FileSystemEntity.isLink(entity.path)) continue;
+            try {
+              if (!await apkDestDir.exists()) {
+                await apkDestDir.create(recursive: true);
+              }
+              final apkTargetPath = p.join(apkDestDir.path, p.basename(entity.path));
+              final apkTargetFile = File(apkTargetPath);
+              final srcStat = await entity.stat();
+              bool shouldCopy = !await apkTargetFile.exists();
+              if (!shouldCopy) {
+                final destStat = await apkTargetFile.stat();
+                if (srcStat.size != destStat.size ||
+                    srcStat.modified.isAfter(
+                      destStat.modified.add(const Duration(seconds: 1)),
+                    )) {
+                  shouldCopy = true;
+                }
+              }
+              if (shouldCopy) {
+                await entity.copy(apkTargetPath);
+                try {
+                  await apkTargetFile.setLastModified(srcStat.modified);
+                } catch (_) {}
+                copiedApks++;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
+
+      return SdCardExportResult(
+        projectCount: 1,
+        copiedFiles: copiedFiles,
+        skippedFiles: skippedFiles,
+        copiedApks: copiedApks,
+        destinationPath: destRoot,
+      );
+    } catch (e) {
+      return SdCardExportResult(
+        projectCount: 0,
+        copiedFiles: copiedFiles,
+        skippedFiles: skippedFiles,
+        copiedApks: copiedApks,
+        destinationPath: destRoot,
+        errorMessage: 'Ошибка экспорта: $e',
+      );
+    }
+  }
+
+  Future<void> _loadAndScanProjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_key);
+    List<Project> savedProjects = [];
+
+    if (data != null) {
+      final List<dynamic> list = json.decode(data);
+      savedProjects = list.map((e) => Project.fromJson(e)).toList();
+    }
+
+    // Dynamic path correction on PC: only convert legacy mobile paths when target does not exist
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      final runtime = _ref.read(runtimeServiceProvider);
+      final pcProjectsDir = p.join(runtime.appDirectory, 'projects');
+      bool modified = false;
+      savedProjects = savedProjects.map((proj) {
+        if (Directory(proj.path).existsSync()) return proj;
+        String newPath = proj.path;
+        if (proj.path.startsWith('/root/projects/')) {
+          newPath = p.join(pcProjectsDir, proj.path.substring('/root/projects/'.length));
+          modified = true;
+        } else if (proj.path.startsWith('/data/user/') && proj.path.contains('/projects/')) {
+          final index = proj.path.indexOf('/projects/');
+          newPath = p.join(pcProjectsDir, proj.path.substring(index + '/projects/'.length));
+          modified = true;
+        }
+        if (newPath != proj.path) {
+          return Project(
+            id: proj.id,
+            name: proj.name,
+            path: newPath,
+            type: proj.type,
+            lastOpened: proj.lastOpened,
+            isInternal: proj.isInternal,
+            platforms: proj.platforms,
+            sdkVersion: proj.sdkVersion,
+          );
+        }
+        return proj;
+      }).toList();
+
+      // Also scan visible ~/QuantumIDEProjects on Desktop so projects created there are always listed
+      try {
+        final desktopDefaultDir = Directory(PlatformUtils.defaultDesktopProjectsDir);
+        if (await desktopDefaultDir.exists()) {
+          await for (final entity in desktopDefaultDir.list(followLinks: false)) {
+            if (entity is Directory) {
+              final name = p.basename(entity.path);
+              if (name.startsWith('.')) continue;
+              final alreadySaved = savedProjects.any((pr) => pr.path == entity.path);
+              if (!alreadySaved) {
+                savedProjects.add(
+                  Project(
+                    id: const Uuid().v4(),
+                    name: name,
+                    path: entity.path,
+                    type: _identifyProjectType(entity.path),
+                    lastOpened: DateTime.now(),
+                    isInternal: false,
+                  ),
+                );
+                modified = true;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (modified) {
+        await prefs.setString(_key, json.encode(savedProjects.map((e) => e.toJson()).toList()));
+      }
+    }
+
+    state = savedProjects;
+    state.sort((a, b) => b.lastOpened.compareTo(a.lastOpened));
+  }
+
+  ProjectType _identifyProjectType(String path) {
+    if (File(p.join(path, 'pubspec.yaml')).existsSync()) {
+      return ProjectType.flutter;
+    } else if (File(p.join(path, 'package.json')).existsSync()) {
+      return ProjectType.nodejs;
+    } else if (File(p.join(path, 'main.py')).existsSync()) {
+      return ProjectType.python;
+    } else if (File(p.join(path, 'index.html')).existsSync()) {
+      return ProjectType.web;
+    }
+    // Also check nested same-named directory
+    try {
+      final name = p.basename(path);
+      final nested = p.join(path, name);
+      if (Directory(nested).existsSync()) {
+        final nestedType = _identifyProjectType(nested);
+        if (nestedType != ProjectType.other) return nestedType;
+      }
+    } catch (_) {}
+    return ProjectType.other;
+  }
+
+  Future<void> _persistProjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, json.encode(state.map((e) => e.toJson()).toList()));
+  }
+
+  Future<void> saveProject(Project project) async {
+    final existingIndex = state.indexWhere((p) => p.id == project.id || p.path == project.path || (p.name == project.name && p.type == project.type));
+    
+    if (existingIndex >= 0) {
+      state[existingIndex] = project;
+      // Trigger a re-sort and UI update
+      state = [...state]..sort((a, b) => b.lastOpened.compareTo(a.lastOpened));
+    } else {
+      state = [project, ...state];
+      state.sort((a, b) => b.lastOpened.compareTo(a.lastOpened));
+    }
+    
+    await _persistProjects();
+  }
+
+  Future<Project> createProject({
+    required String name,
+    required String path,
+    required ProjectType type,
+    List<String>? platforms,
+    String? sdkVersion,
+    String? packageName,
+    String? minSdk,
+  }) async {
+    // Validation: prevent naming project 'flutter' or 'dart'
+    final normalizedName = name.toLowerCase().trim();
+    if (normalizedName == 'flutter' || normalizedName == 'dart') {
+      throw Exception('Project name "$name" is reserved and will cause conflicts.');
+    }
+
+    final runtime = _ref.read(runtimeServiceProvider);
+    final String finalPath;
+    final bool isInternalProject;
+    if (PlatformUtils.isDesktop) {
+      final baseDir = path.trim().isNotEmpty
+          ? path.trim()
+          : PlatformUtils.defaultDesktopProjectsDir;
+      finalPath = p.basename(baseDir) == name
+          ? baseDir
+          : p.join(baseDir, name);
+      isInternalProject = false;
+    } else {
+      // Android/iOS: use fast internal app storage for performance and exec permissions
+      finalPath = p.join(runtime.appDirectory, 'projects', name);
+      isInternalProject = true;
+    }
+
+    final project = Project(
+      id: const Uuid().v4(),
+      name: name,
+      path: finalPath,
+      type: type,
+      lastOpened: DateTime.now(),
+      isInternal: isInternalProject,
+      platforms: platforms,
+      sdkVersion: sdkVersion,
+    );
+    
+    // Ensure parent directory exists
+    final projectDir = Directory(finalPath);
+    if (!await projectDir.exists()) {
+      await projectDir.create(recursive: true);
+    }
+
+    await _initializeProjectFiles(
+      finalPath,
+      type,
+      name,
+      _ref,
+      platforms: platforms,
+      sdkVersion: sdkVersion,
+      packageName: packageName,
+      minSdk: minSdk,
+    );
+    await saveProject(project);
+    return project;
+  }
+
+  Future<Project> importProject(String path) async {
+    final name = p.basename(path);
+    final runtime = _ref.read(runtimeServiceProvider);
+
+    final String finalPath;
+    final bool isInternalProject;
+
+    if (PlatformUtils.isDesktop) {
+      // Desktop (Linux/Windows/macOS): open the project directly in-place at its
+      // real path without copying gigabytes into ~/.quantum_ide/projects!
+      finalPath = path;
+      isInternalProject = false;
+    } else {
+      // Android/iOS: migrate from external storage into internal app storage
+      finalPath = p.join(runtime.appDirectory, 'projects', name);
+      isInternalProject = true;
+      if (path != finalPath) {
+        debugPrint('Importing/Migrating $path to $finalPath');
+        final sourceDir = Directory(path);
+        final targetDir = Directory(finalPath);
+        if (!await targetDir.exists()) {
+          await targetDir.create(recursive: true);
+        }
+        await _copyDirectory(sourceDir, targetDir);
+      }
+    }
+
+    // Identify type based on files
+    final ProjectType type = _identifyProjectType(finalPath);
+
+    final project = Project(
+      id: const Uuid().v4(),
+      name: name,
+      path: finalPath,
+      type: type,
+      lastOpened: DateTime.now(),
+      isInternal: isInternalProject,
+    );
+
+    await saveProject(project);
+    return project;
+  }
+
+  Future<void> _copyDirectory(Directory source, Directory destination) async {
+    await for (final entity in source.list(recursive: false, followLinks: false)) {
+      final baseName = p.basename(entity.path);
+      if (baseName == 'build' || baseName == '.dart_tool' || baseName == 'node_modules') {
+        continue;
+      }
+      try {
+        if (entity is Directory) {
+          final newDirectory = Directory(p.join(destination.path, baseName));
+          if (!await newDirectory.exists()) {
+            await newDirectory.create(recursive: true);
+          }
+          await _copyDirectory(entity, newDirectory);
+        } else if (entity is File) {
+          final targetFile = File(p.join(destination.path, baseName));
+          await entity.copy(targetFile.path);
+        }
+      } catch (e) {
+        debugPrint('Skipped copying ${entity.path}: $e');
+      }
+    }
+  }
+
+  Future<void> _initializeProjectFiles(
+    String path,
+    ProjectType type,
+    String name,
+    Ref ref, {
+    List<String>? platforms,
+    String? sdkVersion,
+    String? packageName,
+    String? minSdk,
+  }) async {
+    // Check storage permission first
+    if (Platform.isAndroid) {
+      final status = await Permission.manageExternalStorage.status;
+      if (!status.isGranted) {
+        await Permission.manageExternalStorage.request();
+      }
+    }
+
+    final runtime = ref.read(runtimeServiceProvider);
+    final dir = Directory(path);
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    String? flutterOrgArg() {
+      final pkg = (packageName ?? '').trim();
+      if (pkg.isEmpty) return null;
+      final dot = pkg.lastIndexOf('.');
+      final org = dot > 0 ? pkg.substring(0, dot) : pkg;
+      return org.isNotEmpty ? ' --org $org' : null;
+    }
+
+    // Try to use CLI tools first if possible
+    bool usedCli = false;
+    try {
+      if (type == ProjectType.flutter) {
+        bool flutterExists = false;
+        try {
+          final flutterFile = File(p.join(runtime.appDirectory, 'rootfs', 'ubuntu', 'root', 'flutter', 'bin', 'flutter'));
+          flutterExists = await flutterFile.exists();
+        } catch (_) {
+          flutterExists = false;
+        }
+        if (!flutterExists) {
+          try {
+            final usrLocalFlutter = File(p.join(runtime.appDirectory, 'rootfs', 'ubuntu', 'usr', 'local', 'bin', 'flutter'));
+            flutterExists = await usrLocalFlutter.exists();
+          } catch (_) {}
+        }
+
+        if (flutterExists || Platform.isAndroid) {
+          // Run flutter create inside the guest container using native runCommand
+          String cmd = 'flutter create --project-name ${name.replaceAll("-", "_")}';
+          final orgArg = flutterOrgArg();
+          if (orgArg != null) cmd += orgArg;
+          if (platforms != null && platforms.isNotEmpty) {
+            cmd += ' --platforms ${platforms.join(",")}';
+          }
+          cmd += ' ${PathMapper.mapToGuest(path, runtime.appDirectory)}';
+          
+          final res = await runtime.runCommand(cmd);
+          if (!res.contains('command not found') && !res.contains('flutter: not found')) {
+            // Patch Android build files to fix AGP + compileSdk compatibility
+            await _patchAndroidBuildFiles(path, sdkVersion: sdkVersion);
+            usedCli = true;
+          }
+        } else if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+          // Desktop: run flutter create natively (no guest rootfs needed)
+          List<String> effectivePlatforms = platforms ?? [];
+          // Always include the current desktop platform so 'flutter run' works out of the box
+          if (Platform.isLinux && !effectivePlatforms.contains('linux')) {
+            effectivePlatforms = [...effectivePlatforms, 'linux'];
+          } else if (Platform.isMacOS && !effectivePlatforms.contains('macos')) {
+            effectivePlatforms = [...effectivePlatforms, 'macos'];
+          } else if (Platform.isWindows && !effectivePlatforms.contains('windows')) {
+            effectivePlatforms = [...effectivePlatforms, 'windows'];
+          }
+          String cmd = 'flutter create --project-name ${name.replaceAll("-", "_")}';
+          final orgArg = flutterOrgArg();
+          if (orgArg != null) cmd += orgArg;
+          if (effectivePlatforms.isNotEmpty) {
+            cmd += ' --platforms ${effectivePlatforms.join(",")}';
+          }
+          cmd += ' "$path"';
+          await runtime.runCommand(cmd);
+          usedCli = true;
+        }
+      } else if (type == ProjectType.dart) {
+        bool dartExists = false;
+        try {
+          final dartFile = File(p.join(runtime.appDirectory, 'rootfs', 'ubuntu', 'root', 'flutter', 'bin', 'dart'));
+          dartExists = await dartFile.exists();
+        } catch (_) {}
+
+        if (dartExists || Platform.isAndroid) {
+          // Run dart create inside the guest container using native runCommand
+          final cmd = 'dart create --force ${PathMapper.mapToGuest(path, runtime.appDirectory)}';
+          final res = await runtime.runCommand(cmd);
+          if (!res.contains('command not found') && !res.contains('dart: not found')) {
+            usedCli = true;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('CLI Generation failed: $e, falling back to manual template');
+    }
+
+    if (usedCli) {
+      await _createQuantumRulesFiles(path, name);
+      return;
+    }
+
+    switch (type) {
+      case ProjectType.flutter:
+        await _createFile(p.join(path, 'pubspec.yaml'), _flutterPubspec(name, sdkVersion: sdkVersion));
+        await _createFile(p.join(path, 'lib', 'main.dart'), _flutterMain());
+        await _createFile(p.join(path, 'analysis_options.yaml'), _analysisOptions());
+        await _createFile(p.join(path, 'README.md'), '# $name\n\nA Flutter project created with QuantumIDE.\n');
+        await _createFile(p.join(path, '.gitignore'), '.dart_tool/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\n.pub-cache/\n.pub/\nbuild/\n*.iml\n.idea/\n');
+        if (platforms == null || platforms.isEmpty || platforms.contains('android')) {
+          await _writeAndroidBuildFiles(path, name, sdkVersion: sdkVersion);
+        }
+        break;
+      case ProjectType.dart:
+        await _createFile(p.join(path, 'pubspec.yaml'), _dartPubspec(name));
+        await _createFile(p.join(path, 'bin', 'main.dart'), _dartMain());
+        await _createFile(p.join(path, 'README.md'), '# $name\n\nA Dart project created with QuantumIDE.\n');
+        await _createFile(p.join(path, '.gitignore'), '.dart_tool/\n.packages\n.pub/\nbuild/\n*.iml\n.idea/\n');
+        break;
+      case ProjectType.nodejs:
+        await _createFile(p.join(path, 'package.json'), _nodePackage(name));
+        await _createFile(p.join(path, 'index.js'), _nodeIndexJs(name));
+        await _createFile(p.join(path, 'README.md'), '# $name\n\nA Node.js project created with QuantumIDE.\n');
+        await _createFile(p.join(path, '.gitignore'), 'node_modules/\nbuild/\n*.iml\n.idea/\n');
+        break;
+      case ProjectType.python:
+        await _createFile(p.join(path, 'main.py'), "print('Hello from QuantumIDE Python!')\n");
+        await _createFile(p.join(path, 'requirements.txt'), '');
+        await _createFile(p.join(path, 'README.md'), '# $name\n\nA Python project created with QuantumIDE.\n');
+        await _createFile(p.join(path, '.gitignore'), '__pycache__/\n*.pyc\n.idea/\n.venv/\nvenv/\n');
+        break;
+      case ProjectType.web:
+        await _createFile(p.join(path, 'index.html'), _webHtml(name));
+        await _createFile(p.join(path, 'style.css'), 'body { background: #0f1117; color: white; font-family: sans-serif; }\n');
+        await _createFile(p.join(path, 'script.js'), "console.log('Web project loaded');\n");
+        await _createFile(p.join(path, 'README.md'), '# $name\n\nA web project created with QuantumIDE.\n');
+        await _createFile(p.join(path, '.gitignore'), 'node_modules/\nbuild/\n*.iml\n.idea/\n');
+        break;
+      case ProjectType.androidJava:
+      case ProjectType.androidKotlin:
+        await _writeNativeAndroidFiles(
+          path,
+          name,
+          type,
+          sdkVersion: sdkVersion,
+          packageName: packageName,
+          minSdk: minSdk,
+        );
+        break;
+      case ProjectType.rust:
+        await _createRustProject(path, name);
+        break;
+      default:
+        await _createFile(p.join(path, 'README.md'), '# $name\nCreated with QuantumIDE\n');
+    }
+
+    // Auto-create QuantumIDE AI rules and agents file
+    await _createQuantumRulesFiles(path, name);
+  }
+
+  Future<void> _createRustProject(String path, String name) async {
+    await _createFile(p.join(path, 'Cargo.toml'), '''[package]
+name = "${name.toLowerCase().replaceAll(' ', '-')}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+''');
+    await Directory(p.join(path, 'src')).create(recursive: true);
+    await _createFile(p.join(path, 'src', 'main.rs'), '''fn main() {
+    println!("Hello from $name!");
+}
+''');
+    await _createFile(p.join(path, 'README.md'), '# $name\n\nA Rust project created with QuantumIDE.\n');
+    await _createFile(p.join(path, '.gitignore'), 'target/\nCargo.lock\n*.iml\n.idea/\n');
+  }
+
+  Future<void> _createQuantumRulesFiles(String path, String name) async {
+    final quantumRules = File(p.join(path, '.quantumrules'));
+    if (!await quantumRules.exists()) {
+      await quantumRules.writeAsString(
+'# QuantumIDE Project Rules\n'
+'# These rules guide the AI assistant for the "$name" project.\n'
+'\n'
+'## Code Style\n'
+'- Keep code clean, readable and well-commented.\n'
+'- Prefer small focused functions/widgets over large monolithic ones.\n'
+'- Always handle errors and edge cases.\n'
+'\n'
+'## AI Behavior\n'
+'- Be concise. No unnecessary filler text.\n'
+'- When modifying files, show only the changed sections with context.\n'
+'- Always explain what was changed and why.\n'
+'- Prefer incremental changes over full rewrites.\n',
+      );
+    }
+    final agentsMd = File(p.join(path, 'AGENTS.md'));
+    if (!await agentsMd.exists()) {
+      await agentsMd.writeAsString(
+'# AGENTS\n'
+'## Project: $name\n'
+'\n'
+'This file defines AI agent behavior for this project.\n'
+'\n'
+'## Context\n'
+'- Project name: $name\n'
+'- IDE: QuantumIDE\n'
+'\n'
+'## Rules\n'
+'1. Read existing code before making changes.\n'
+'2. Follow the code style already used in the project.\n'
+'3. When adding dependencies, update pubspec.yaml and run flutter pub get.\n'
+'4. Write tests when adding new business logic.\n'
+'5. Avoid breaking existing functionality.\n',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Android build file patching
+  // ---------------------------------------------------------------------------
+
+  /// Патчит Android build файлы существующего проекта (после flutter create).
+  /// Устанавливает AGP 8.11.1 и compileSdk 34 чтобы избежать проблем с
+  /// повреждённым android-36/android.jar.
+  Future<void> _patchAndroidBuildFiles(String projectPath, {String? sdkVersion}) async {
+    final sdk = sdkVersion ?? '34';
+    debugPrint('[ProjectService] Patching Android build files in $projectPath with compileSdk $sdk');
+
+    // --- android/app/build.gradle.kts ---
+    final appBuildFile = File(p.join(projectPath, 'android', 'app', 'build.gradle.kts'));
+    if (await appBuildFile.exists()) {
+      String content = await appBuildFile.readAsString();
+      // Зафиксировать compileSdk = sdk чтобы не грузить сломанный android-36
+      content = content
+          .replaceAll('compileSdk = flutter.compileSdkVersion', 'compileSdk = $sdk')
+          .replaceAll('compileSdk = 36', 'compileSdk = $sdk')
+          .replaceAll('compileSdk = 35', 'compileSdk = $sdk')
+          .replaceAll('compileSdk flutter.compileSdkVersion', 'compileSdk $sdk')
+          .replaceAll('compileSdkVersion 36', 'compileSdkVersion $sdk')
+          .replaceAll('compileSdkVersion 35', 'compileSdkVersion $sdk')
+          .replaceAll('targetSdk = flutter.targetSdkVersion', 'targetSdk = $sdk')
+          .replaceAll('targetSdk = 36', 'targetSdk = $sdk')
+          .replaceAll('targetSdk = 35', 'targetSdk = $sdk');
+      
+      // Автоматически добавить abiFilters для arm64-v8a если они отсутствуют
+      if (content.contains('defaultConfig {') && !content.contains('abiFilters')) {
+        content = content.replaceFirst(
+          'defaultConfig {',
+          'defaultConfig {\n        ndk {\n            abiFilters += listOf("arm64-v8a")\n        }',
+        );
+      }
+      
+      await appBuildFile.writeAsString(content);
+      debugPrint('[ProjectService] Patched app/build.gradle.kts');
+    }
+
+    // --- android/app/build.gradle (Groovy fallback) ---
+    final appBuildGroovy = File(p.join(projectPath, 'android', 'app', 'build.gradle'));
+    if (await appBuildGroovy.exists()) {
+      String content = await appBuildGroovy.readAsString();
+      content = content
+          .replaceAll('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion $sdk')
+          .replaceAll('compileSdkVersion 36', 'compileSdkVersion $sdk')
+          .replaceAll('compileSdkVersion 35', 'compileSdkVersion $sdk')
+          .replaceAll('compileSdk flutter.compileSdkVersion', 'compileSdk $sdk')
+          .replaceAll('compileSdk 36', 'compileSdk $sdk')
+          .replaceAll('compileSdk 35', 'compileSdk $sdk');
+      
+      if (content.contains('defaultConfig {') && !content.contains('abiFilters')) {
+        content = content.replaceFirst(
+          'defaultConfig {',
+          'defaultConfig {\n        ndk {\n            abiFilters \x27arm64-v8a\x27\n        }',
+        );
+      }
+      
+      await appBuildGroovy.writeAsString(content);
+      debugPrint('[ProjectService] Patched app/build.gradle');
+    }
+
+    // --- android/build.gradle.kts (top-level) ---
+    final topBuildFile = File(p.join(projectPath, 'android', 'build.gradle.kts'));
+    if (await topBuildFile.exists()) {
+      String content = await topBuildFile.readAsString();
+      // Обновить AGP до 8.11.1
+      content = content.replaceAllMapped(
+        RegExp(r'com\.android\.tools\.build:gradle:[\d.]+'),
+        (_) => 'com.android.tools.build:gradle:8.11.1',
+      );
+      await topBuildFile.writeAsString(content);
+      debugPrint('[ProjectService] Patched build.gradle.kts (top-level)');
+    }
+
+    // --- android/build.gradle (Groovy fallback) ---
+    final topBuildGroovy = File(p.join(projectPath, 'android', 'build.gradle'));
+    if (await topBuildGroovy.exists()) {
+      String content = await topBuildGroovy.readAsString();
+      content = content.replaceAllMapped(
+        RegExp(r'com\.android\.tools\.build:gradle:[\d.]+'),
+        (_) => 'com.android.tools.build:gradle:8.11.1',
+      );
+      await topBuildGroovy.writeAsString(content);
+      debugPrint('[ProjectService] Patched build.gradle (Groovy)');
+    }
+
+    // --- android/settings.gradle.kts ---
+    final settingsFile = File(p.join(projectPath, 'android', 'settings.gradle.kts'));
+    if (await settingsFile.exists()) {
+      String content = await settingsFile.readAsString();
+      // Обновить версию AGP плагина в секции plugins {}
+      content = content.replaceAllMapped(
+        RegExp(r'id\("com\.android\.application"\)\s+version\s+"[\d.]+"'),
+        (_) => 'id("com.android.application") version "8.11.1"',
+      );
+      content = content.replaceAllMapped(
+        RegExp(r'id\("com\.android\.library"\)\s+version\s+"[\d.]+"'),
+        (_) => 'id("com.android.library") version "8.11.1"',
+      );
+      content = content.replaceAllMapped(
+        RegExp(r'id\("org\.jetbrains\.kotlin\.android"\)\s+version\s+"[\d.]+"'),
+        (_) => 'id("org.jetbrains.kotlin.android") version "2.2.20"',
+      );
+      await settingsFile.writeAsString(content);
+      debugPrint('[ProjectService] Patched settings.gradle.kts');
+    }
+
+    // --- android/settings.gradle (Groovy fallback) ---
+    final settingsGroovy = File(p.join(projectPath, 'android', 'settings.gradle'));
+    if (await settingsGroovy.exists()) {
+      String groovyContent = await settingsGroovy.readAsString();
+      groovyContent = groovyContent.replaceAllMapped(
+        RegExp(r"id 'com\.android\.application' version '[\d.]+' apply false"),
+        (_) => "id 'com.android.application' version '8.11.1' apply false",
+      );
+      await settingsGroovy.writeAsString(groovyContent);
+      debugPrint('[ProjectService] Patched settings.gradle (Groovy)');
+    }
+
+    // --- android/gradle/wrapper/gradle-wrapper.properties ---
+    final wrapperFile = File(p.join(projectPath, 'android', 'gradle', 'wrapper', 'gradle-wrapper.properties'));
+    if (await wrapperFile.exists()) {
+      String wrapperContent = await wrapperFile.readAsString();
+      if (!wrapperContent.contains('gradle-8.14')) {
+        wrapperContent = wrapperContent.replaceAllMapped(
+          RegExp(r'distributionUrl=.*'),
+          (_) => r'distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-all.zip',
+        );
+        await wrapperFile.writeAsString(wrapperContent);
+        debugPrint('[ProjectService] Patched gradle-wrapper.properties to 8.14-all');
+      }
+    } else {
+      await _copyGradleWrapper(p.join(projectPath, 'android'));
+    }
+
+    // --- android/gradle.properties (Dynamically auto-tuned for hardware) ---
+    final gradlePropsFile = File(p.join(projectPath, 'android', 'gradle.properties'));
+    final resourceConfig = BuildResourceOptimizer.computeResourceConfig();
+    final safeProps = '''org.gradle.jvmargs=-Xmx${resourceConfig.jvmHeapMb}m -XX:MaxMetaspaceSize=${resourceConfig.jvmMetaspaceMb}m
+android.useAndroidX=true
+android.enableJetifier=true
+org.gradle.daemon=false
+org.gradle.parallel=${resourceConfig.parallel}
+org.gradle.workers.max=${resourceConfig.workers}
+android.aapt2.daemon=false
+org.gradle.java.home=/usr/lib/jvm/java-17-openjdk-arm64
+''';
+    await gradlePropsFile.writeAsString(safeProps);
+    debugPrint('[ProjectService] Injected adaptive mobile gradle.properties (workers=${resourceConfig.workers}, jvm=${resourceConfig.jvmHeapMb}m)');
+
+    // --- android/local.properties ---
+    final localProps = File(p.join(projectPath, 'android', 'local.properties'));
+    if (!await localProps.exists()) {
+      await localProps.writeAsString('flutter.sdk=/root/flutter\n');
+    }
+  }
+
+  /// Создаёт совместимые Android build файлы для ручного шаблона Flutter проекта.
+  Future<void> _writeAndroidBuildFiles(String projectPath, String name, {String? sdkVersion}) async {
+    final androidDir = p.join(projectPath, 'android');
+    final appDir = p.join(androidDir, 'app');
+    final sdk = sdkVersion ?? '35';
+    final safeName = name.toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+    final appId = 'com.example.$safeName';
+    final pkgPath = appId.replaceAll('.', '/');
+
+    // ── settings.gradle.kts (Kotlin DSL — правильный синтаксис) ──
+    await _createFile(p.join(androidDir, 'settings.gradle.kts'), '''
+pluginManagement {
+    val flutterSdkPath = run {
+        val properties = java.util.Properties()
+        file("local.properties").inputStream().use { properties.load(it) }
+        val flutterSdkPath = properties.getProperty("flutter.sdk")
+        require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
+        flutterSdkPath
+    }
+
+    includeBuild("\$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "8.11.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+}
+
+include(":app")
+rootProject.name = "$name"
+''');
+
+    // ── build.gradle.kts (top-level) ──
+    await _createFile(p.join(androidDir, 'build.gradle.kts'), '''
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
+rootProject.layout.buildDirectory.value(newBuildDir)
+
+subprojects {
+    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
+    project.layout.buildDirectory.value(newSubprojectBuildDir)
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register<Delete>("clean") {
+    delete(rootProject.layout.buildDirectory)
+}
+''');
+
+    // ── app/build.gradle.kts ──
+    await _createFile(p.join(appDir, 'build.gradle.kts'), '''
+plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
+android {
+    namespace = "$appId"
+    compileSdk = $sdk
+    ndkVersion = "27.0.12077973"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        applicationId = "$appId"
+        minSdk = 21
+        targetSdk = $sdk
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+flutter {
+    source = "../.."
+}
+''');
+
+    // ── gradle.properties (Adaptive) ──
+    final newProjConfig = BuildResourceOptimizer.computeResourceConfig();
+    await _createFile(p.join(androidDir, 'gradle.properties'), 'org.gradle.jvmargs=-Xmx${newProjConfig.jvmHeapMb}m -XX:MaxMetaspaceSize=${newProjConfig.jvmMetaspaceMb}m\nandroid.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.daemon=false\norg.gradle.parallel=${newProjConfig.parallel}\norg.gradle.workers.max=${newProjConfig.workers}\norg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-arm64\n');
+
+    // ── local.properties ──
+    await _createFile(p.join(androidDir, 'local.properties'), 'flutter.sdk=/root/flutter\nflutter.buildMode=debug\nflutter.versionName=1.0.0\nflutter.versionCode=1\n');
+
+    // ── gradle/wrapper/gradle-wrapper.properties ──
+    await _createFile(p.join(androidDir, 'gradle', 'wrapper', 'gradle-wrapper.properties'),
+        'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-all.zip\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n');
+
+    // ── app/src/main/AndroidManifest.xml ──
+    await _createFile(p.join(appDir, 'src', 'main', 'AndroidManifest.xml'), '''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:label="$name"
+        android:name="\${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>
+''');
+
+    // ── app/src/debug/AndroidManifest.xml ──
+    await _createFile(p.join(appDir, 'src', 'debug', 'AndroidManifest.xml'),
+        '<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>\n');
+
+    // ── app/src/profile/AndroidManifest.xml ──
+    await _createFile(p.join(appDir, 'src', 'profile', 'AndroidManifest.xml'),
+        '<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n</manifest>\n');
+
+    // ── app/src/main/res/values/strings.xml ──
+    await _createFile(p.join(appDir, 'src', 'main', 'res', 'values', 'strings.xml'),
+        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">$name</string>\n</resources>\n');
+
+    // ── app/src/main/res/values/styles.xml ──
+    await _createFile(p.join(appDir, 'src', 'main', 'res', 'values', 'styles.xml'),
+        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">\n        <item name="android:windowBackground">@android:color/white</item>\n    </style>\n    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">\n        <item name="android:windowBackground">?android:colorBackground</item>\n    </style>\n</resources>\n');
+
+    // ── app/src/main/kotlin/.../MainActivity.kt ──
+    await _createFile(p.join(appDir, 'src', 'main', 'kotlin', pkgPath, 'MainActivity.kt'),
+        'package $appId\n\nimport io.flutter.embedding.android.FlutterActivity\n\nclass MainActivity : FlutterActivity()\n');
+
+    // ── .gitignore ──
+    await _createFile(p.join(projectPath, '.gitignore'),
+        '.dart_tool/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\n.pub-cache/\n.pub/\nbuild/\nandroid/.gradle/\nandroid/local.properties\n*.iml\n');
+
+    // Попытка скопировать gradlew и gradle-wrapper.jar
+    await _copyGradleWrapper(androidDir);
+  }
+
+  @visibleForTesting
+  Future<void> writeNativeAndroidFilesForTesting(String projectPath, String name, ProjectType type, {String? sdkVersion}) {
+    return _writeNativeAndroidFiles(projectPath, name, type, sdkVersion: sdkVersion);
+  }
+
+  Future<void> _writeNativeAndroidFiles(
+    String projectPath,
+    String name,
+    ProjectType type, {
+    String? sdkVersion,
+    String? packageName,
+    String? minSdk,
+  }) async {
+    final sanitizedName = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final fallbackPkg =
+        'com.example.${sanitizedName.isEmpty ? 'app' : sanitizedName}';
+    final pkg = (packageName != null && packageName.trim().contains('.'))
+        ? packageName.trim().toLowerCase()
+        : fallbackPkg;
+    final compileSdkInt = int.tryParse(sdkVersion ?? '') ?? 35;
+    final minSdkInt = int.tryParse(minSdk ?? '') ?? 24;
+    
+    final pkgPath = pkg.replaceAll('.', '/');
+    final isKotlin = type == ProjectType.androidKotlin;
+
+    // 1. root settings.gradle.kts
+    await _createFile(p.join(projectPath, 'settings.gradle.kts'), '''pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "$name"
+include(":app")
+''');
+
+    // 2. root build.gradle.kts
+    final rootPluginsBlock = isKotlin ? '''plugins {
+    id("com.android.application") version "8.11.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+}''' : '''plugins {
+    id("com.android.application") version "8.11.1" apply false
+}''';
+
+    await _createFile(p.join(projectPath, 'build.gradle.kts'), '''$rootPluginsBlock
+''');
+
+    // 2.1 local.properties
+    final sdkPath = _getAndroidSdkPath();
+    await _createFile(p.join(projectPath, 'local.properties'), 'sdk.dir=$sdkPath\n');
+
+    // 2.2 gradle.properties (Optimized for ARM64 PRoot / Android tablets)
+    await _createFile(p.join(projectPath, 'gradle.properties'), '''android.useAndroidX=true
+android.enableJetifier=false
+kotlin.code.style=official
+android.nonTransitiveRClass=true
+systemProp.java.net.preferIPv4Stack=true
+org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
+org.gradle.daemon=false
+org.gradle.caching=true
+org.gradle.vfs.watch=false
+org.gradle.parallel=false
+org.gradle.workers.max=1
+kotlin.compiler.execution.strategy=in-process
+android.aapt2.daemon=false
+android.aapt2FromMaven=false
+android.aapt2FromMavenOverride=/usr/bin/aapt2
+''');
+
+    // 3. app/build.gradle.kts
+    final pluginsBlock = isKotlin ? '''plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}''' : '''plugins {
+    id("com.android.application")
+}''';
+
+    final kotlinOptionsBlock = isKotlin ? '''
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}''' : '';
+
+    final dependenciesBlock = isKotlin ? '''dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+}''' : '''dependencies {
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+}''';
+
+    await _createFile(p.join(projectPath, 'app', 'build.gradle.kts'), '''$pluginsBlock
+
+android {
+    namespace = "$pkg"
+    compileSdk = $compileSdkInt
+
+    defaultConfig {
+        applicationId = "$pkg"
+        minSdk = $minSdkInt
+        targetSdk = $compileSdkInt
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+$kotlinOptionsBlock
+
+$dependenciesBlock
+''');
+
+    // 4. app/src/main/AndroidManifest.xml
+    await _createFile(p.join(projectPath, 'app', 'src', 'main', 'AndroidManifest.xml'), '''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="$name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
+''');
+
+    // 4.1 default adaptive mipmap icons
+    const iconXml = '''<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:color="@android:color/holo_blue_dark"/>
+    <foreground android:drawable="@android:drawable/sym_def_app_icon"/>
+</adaptive-icon>
+''';
+    await _createFile(p.join(projectPath, 'app', 'src', 'main', 'res', 'mipmap-anydpi-v26', 'ic_launcher.xml'), iconXml);
+    await _createFile(p.join(projectPath, 'app', 'src', 'main', 'res', 'mipmap-anydpi-v26', 'ic_launcher_round.xml'), iconXml);
+
+    // 5. app/src/main/res/values/strings.xml
+    await _createFile(p.join(projectPath, 'app', 'src', 'main', 'res', 'values', 'strings.xml'), '''<resources>
+    <string name="app_name">$name</string>
+</resources>
+''');
+
+    // 6. app/src/main/res/layout/activity_main.xml
+    await _createFile(p.join(projectPath, 'app', 'src', 'main', 'res', 'layout', 'activity_main.xml'), '''<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/textViewTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="$name (${isKotlin ? 'Kotlin' : 'Java'})"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/textViewCounter"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Clicks: 0"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/btnClick"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="Click Me!" />
+
+</LinearLayout>
+''');
+
+    // 7. MainActivity
+    if (isKotlin) {
+      await _createFile(p.join(projectPath, 'app', 'src', 'main', 'java', pkgPath, 'MainActivity.kt'), '''package $pkg
+
+import android.os.Bundle
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+    private var counter = 0
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val titleView = findViewById<TextView>(R.id.textViewTitle)
+        val counterView = findViewById<TextView>(R.id.textViewCounter)
+        val button = findViewById<Button>(R.id.btnClick)
+
+        titleView.text = "$name (Kotlin)"
+        button.setOnClickListener {
+            counter++
+            counterView.text = "Clicks: \$counter"
+            Toast.makeText(this, "Button clicked: \$counter", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+''');
+    } else {
+      await _createFile(p.join(projectPath, 'app', 'src', 'main', 'java', pkgPath, 'MainActivity.java'), '''package $pkg;
+
+import android.os.Bundle;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+
+public class MainActivity extends AppCompatActivity {
+    private int counter = 0;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        TextView titleView = findViewById(R.id.textViewTitle);
+        TextView counterView = findViewById(R.id.textViewCounter);
+        Button button = findViewById(R.id.btnClick);
+
+        titleView.setText("$name (Java)");
+        button.setOnClickListener(v -> {
+            counter++;
+            counterView.setText("Clicks: " + counter);
+            Toast.makeText(MainActivity.this, "Button clicked: " + counter, Toast.LENGTH_SHORT).show();
+        });
+    }
+}
+''');
+    }
+
+    // 8. Proguard rules
+    await _createFile(p.join(projectPath, 'app', 'proguard-rules.pro'), '# Add project specific ProGuard rules here.\n');
+
+    // 9. Copy Gradle wrapper
+    await _copyGradleWrapper(projectPath);
+  }
+
+  Future<void> _copyGradleWrapper(String destPath) async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    // Search for gradle wrapper in various known locations
+    final sourcePaths = [
+      p.join(runtime.appDirectory, 'projects', '.gradle_template'),
+      p.join(runtime.filesDir, 'projects', '.gradle_template'),
+      '/root/projects/.gradle_template',
+      '/root/flutter/bin/cache/artifacts/gradle_wrapper',
+      p.join(runtime.appDirectory, 'android'),
+      p.join(Directory.current.path, 'android'),
+      p.join(Directory.current.path, 'quantum_ide-main', 'android'),
+    ];
+
+    final filesToCopy = [
+      'gradlew',
+      'gradlew.bat',
+      'gradle/wrapper/gradle-wrapper.jar',
+    ];
+
+    bool copiedWrapperJar = false;
+    for (final srcRoot in sourcePaths) {
+      bool exists = false;
+      try {
+        exists = await Directory(srcRoot).exists();
+      } catch (_) {
+        exists = false;
+      }
+      if (!exists) continue;
+
+      for (final relPath in filesToCopy) {
+        try {
+          final srcFile = File(p.join(srcRoot, relPath));
+          if (await srcFile.exists()) {
+            final destFile = File(p.join(destPath, relPath));
+            if (!await destFile.exists()) {
+              await destFile.parent.create(recursive: true);
+              await srcFile.copy(destFile.path);
+              if (relPath == 'gradlew') {
+                try {
+                  await Process.run('chmod', ['+x', destFile.path]);
+                } catch (_) {}
+              }
+              if (relPath.endsWith('gradle-wrapper.jar')) {
+                copiedWrapperJar = true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+      if (copiedWrapperJar) break;
+    }
+
+    // Fallback: extract bundled gradle-wrapper.jar from assets if missing
+    final destWrapperJar = File(p.join(destPath, 'gradle', 'wrapper', 'gradle-wrapper.jar'));
+    if (!await destWrapperJar.exists()) {
+      try {
+        final byteData = await rootBundle.load('assets/bin/gradle-wrapper.jar');
+        await destWrapperJar.parent.create(recursive: true);
+        await destWrapperJar.writeAsBytes(
+          byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes),
+          flush: true,
+        );
+      } catch (_) {}
+    }
+
+    try {
+      final propFile = File(p.join(destPath, 'gradle', 'wrapper', 'gradle-wrapper.properties'));
+      if (!await propFile.exists()) {
+        await _createFile(propFile.path, '''distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-bin.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+''');
+      }
+
+      final gradlewFile = File(p.join(destPath, 'gradlew'));
+      if (!await gradlewFile.exists()) {
+        await _createFile(gradlewFile.path, '''#!/bin/bash
+# Smart gradlew for QuantumIDE ARM64 environment
+DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+
+# Ensure AAPT2 modern override and IPv4 in gradle.properties
+if [ -f "\$DIR/gradle.properties" ]; then
+    grep -q "android.aapt2FromMavenOverride" "\$DIR/gradle.properties" 2>/dev/null || printf "\\nsystemProp.java.net.preferIPv4Stack=true\\nandroid.useAndroidX=true\\nandroid.enableJetifier=false\\nandroid.aapt2.daemon=false\\nandroid.aapt2FromMaven=false\\nandroid.aapt2FromMavenOverride=/usr/bin/aapt2\\norg.gradle.daemon=false\\norg.gradle.parallel=false\\norg.gradle.workers.max=1\\n" >> "\$DIR/gradle.properties"
+fi
+
+# Auto-repair deprecated kotlinOptions in app/build.gradle.kts
+if [ -f "\$DIR/app/build.gradle.kts" ] && grep -q "kotlinOptions" "\$DIR/app/build.gradle.kts" 2>/dev/null; then
+    python3 -c 'import re, os
+p = "'"\$DIR/app/build.gradle.kts"'"
+if os.path.exists(p):
+    with open(p, "r") as f: c = f.read()
+    if "kotlinOptions" in c:
+        c = re.sub(r"[ \t]*kotlinOptions\\s*[{][^}]*[}]", "\n", c)
+        if "compilerOptions" not in c:
+            c += "\ntasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {\n    compilerOptions {\n        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n    }\n}\n"
+        with open(p, "w") as f: f.write(c)' 2>/dev/null || true
+fi
+
+# Ensure local.properties SDK path if absent
+if [ -d /root/android-sdk ] && [ ! -f "\$DIR/local.properties" ]; then
+    printf "sdk.dir=/root/android-sdk\\n" > "\$DIR/local.properties" 2>/dev/null || true
+fi
+
+GRADLE_BIN=""
+if [ -x "/opt/gradle/gradle-8.13/bin/gradle" ]; then
+    GRADLE_BIN="/opt/gradle/gradle-8.13/bin/gradle"
+elif [ -x "/usr/local/bin/gradle" ]; then
+    GRADLE_BIN="/usr/local/bin/gradle"
+elif command -v gradle >/dev/null 2>&1; then
+    GRADLE_BIN="\$(command -v gradle)"
+fi
+
+JAVACMD="java"
+if [ -n "\$JAVA_HOME" ] && [ -x "\$JAVA_HOME/bin/java" ]; then
+    JAVACMD="\$JAVA_HOME/bin/java"
+elif [ -x "/usr/lib/jvm/java-17-openjdk-arm64/bin/java" ]; then
+    JAVACMD="/usr/lib/jvm/java-17-openjdk-arm64/bin/java"
+fi
+
+if [ -f "\$DIR/gradle/wrapper/gradle-wrapper.jar" ]; then
+    exec "\$JAVACMD" -Dorg.gradle.appname=gradlew -classpath "\$DIR/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "\$@"
+elif [ -n "\$GRADLE_BIN" ]; then
+    exec "\$GRADLE_BIN" "\$@"
+else
+    echo "Downloading Gradle Wrapper..."
+    mkdir -p "\$DIR/gradle/wrapper"
+    if curl -k -fsSL --retry 2 "https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradle/wrapper/gradle-wrapper.jar" -o "\$DIR/gradle/wrapper/gradle-wrapper.jar" 2>/dev/null; then
+        exec "\$JAVACMD" -Dorg.gradle.appname=gradlew -classpath "\$DIR/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "\$@"
+    fi
+    echo "ERROR: Gradle not found. Please install Gradle in QuantumIDE Packages." >&2
+    exit 1
+fi
+''');
+      }
+      try {
+        await Process.run('chmod', ['+x', gradlewFile.path]);
+      } catch (_) {}
+    } catch (_) {}
+  }
+
+  String _getAndroidSdkPath() {
+    if (Platform.isAndroid) {
+      return '/root/android-sdk';
+    }
+    if (Directory('/root/android-sdk').existsSync()) {
+      return '/root/android-sdk';
+    }
+    if (Directory('/usr/lib/android-sdk').existsSync()) {
+      return '/usr/lib/android-sdk';
+    }
+    final home = Platform.environment['HOME'] ?? '/root';
+    final userSdk = p.join(home, 'Android', 'Sdk');
+    if (Directory(userSdk).existsSync()) {
+      return userSdk;
+    }
+    return Platform.environment['ANDROID_HOME'] ?? 
+           Platform.environment['ANDROID_SDK_ROOT'] ?? 
+           p.join(home, 'android-sdk');
+  }
+
+  Future<void> _createFile(String path, String content) async {
+    final file = File(path);
+    if (!await file.parent.exists()) await file.parent.create(recursive: true);
+    await file.writeAsString(content);
+  }
+
+  String _flutterPubspec(String name, {String? sdkVersion}) => '''name: $name
+description: A new Flutter project.
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+flutter:
+  uses-material-design: true
+''';
+
+  String _flutterMain() => '''import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Flutter Demo',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const MyHomePage(title: 'QuantumIDE Flutter App'),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key, required this.title});
+  final String title;
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+  void _incrementCounter() {
+    setState(() { _counter++; });
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Text(widget.title),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text('You have pushed the button this many times:'),
+            Text('\$_counter', style: Theme.of(context).textTheme.headlineMedium),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+''';
+
+  String _dartPubspec(String name) => '''name: $name
+description: A sample command-line application.
+version: 1.0.0
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  path: ^1.8.0
+dev_dependencies:
+  lints: ^2.0.0
+  test: ^1.21.0
+''';
+
+  String _dartMain() => "void main() {\n  print('Hello from QuantumIDE Dart!');\n}\n";
+
+  String _nodePackage(String name) => '''{
+  "name": "$name",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {}
+}
+''';
+
+  String _nodeIndexJs(String name) => '''const http = require('http');
+const port = process.env.PORT || 3000;
+
+const server = http.createServer((req, res) => {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>$name</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #1e293b; padding: 2rem 3rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); text-align: center; }
+    h1 { color: #38bdf8; margin-top: 0; }
+    p { color: #94a3b8; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🚀 Hello from QuantumIDE!</h1>
+    <p>Node.js server for <strong>$name</strong> is running on port \${port}</p>
+  </div>
+</body>
+</html>`);
+});
+
+server.listen(port, () => {
+  console.log(`Server running at http://localhost:\${port}/`);
+});
+''';
+
+  String _webHtml(String name) => '''<!DOCTYPE html>
+<html>
+<head>
+    <title>$name</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>$name</h1>
+    <p>Created with QuantumIDE</p>
+    <script src="script.js"></script>
+</body>
+</html>
+''';
+
+  String _analysisOptions() => 'include: package:flutter_lints/analysis_options.yaml\n';
+
+  Future<void> removeProject(String id, {bool deleteFiles = false}) async {
+    final project = state.firstWhere((p) => p.id == id);
+    
+    // If this is the current workspace, close it
+    final workspace = _ref.read(workspaceProvider);
+    if (workspace.currentPath == project.path) {
+      await _ref.read(workspaceProvider.notifier).closeWorkspace();
+    }
+
+    if (deleteFiles) {
+      try {
+        final dir = Directory(project.path);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      } catch (e) {
+        debugPrint('Failed to delete project files: $e');
+      }
+    }
+
+    state = state.where((p) => p.id != id).toList();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, json.encode(state.map((e) => e.toJson()).toList()));
+  }
+
+  void runProject(Project project, {String? targetDevice}) {
+    final terminal = _ref.read(terminalTabsProvider.notifier);
+    final guestPath = PathMapper.mapToGuest(project.path, _ref.read(runtimeServiceProvider).appDirectory);
+    
+    String command;
+    switch (project.type) {
+      case ProjectType.flutter:
+        if (Platform.isAndroid) {
+          command = 'cd "$guestPath" && flutter run -d ${targetDevice ?? "web-server --web-port 8080"}';
+        } else {
+          command = 'cd "$guestPath" && flutter run -d ${targetDevice ?? "linux"}';
+        }
+        break;
+      case ProjectType.python:
+        command = 'cd "$guestPath" && python3 main.py';
+        break;
+      case ProjectType.nodejs:
+        command = 'cd "$guestPath" && node index.js';
+        break;
+      case ProjectType.dart:
+        command = 'cd "$guestPath" && dart bin/main.dart';
+        break;
+      case ProjectType.shell:
+        command = 'cd "$guestPath" && [ -f main.sh ] && chmod +x main.sh && ./main.sh || ls -la';
+        break;
+      case ProjectType.androidJava:
+      case ProjectType.androidKotlin:
+        command = 'cd "$guestPath" && (gradlew installDebug || gradlew assembleDebug)';
+        break;
+      case ProjectType.rust:
+        command = 'cd "$guestPath" && cargo run';
+        break;
+      default:
+        command = 'cd "$guestPath" && ls -la';
+    }
+    
+    terminal.sendCommand(command);
+  }
+
+  /// Генерирует нативную Android WebView обёртку (.quantum_android_apk) для любого
+  /// Web / HTML5 / JS / React / Node.js проекта, чтобы собрать готовый .apk в 1 клик.
+  Future<String> prepareWebApkWrapper(String projectPath, String rawName) async {
+    final cleanName = rawName.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+    final appName = cleanName.isEmpty ? 'WebApp' : cleanName;
+    final wrapperDir = p.join(projectPath, '.quantum_android_apk');
+    final pkg = 'com.quantum.webapp.${appName.toLowerCase()}';
+    final pkgPath = pkg.replaceAll('.', '/');
+
+    await _writeNativeAndroidFiles(wrapperDir, rawName, ProjectType.androidKotlin);
+
+    // Заменяем MainActivity.kt на полноценный полноэкранный WebView-контейнер
+    final mainActivityPath = p.join(wrapperDir, 'app', 'src', 'main', 'java', pkgPath, 'MainActivity.kt');
+    // Также удалим стандартный MainActivity из com.example.*, если имя пакета отличается
+    final defaultPkg = 'com.example.${rawName.toLowerCase().replaceAll('-', '_')}';
+    final defaultPkgPath = defaultPkg.replaceAll('.', '/');
+    final targetActivityPath = p.join(wrapperDir, 'app', 'src', 'main', 'java', defaultPkgPath, 'MainActivity.kt');
+    await _createFile(targetActivityPath, '''package $defaultPkg
+
+import android.annotation.SuppressLint
+import android.os.Bundle
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+    private lateinit var webView: WebView
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        supportActionBar?.hide()
+
+        webView = WebView(this)
+        setContentView(webView)
+
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            mediaPlaybackRequiresUserGesture = false
+            setSupportZoom(false)
+        }
+        webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                return false
+            }
+        }
+
+        webView.loadUrl("file:///android_asset/www/index.html")
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+    }
+}
+''');
+    // Ignore unused mainActivityPath variable check by keeping defaultPkgPath consistent
+    if (mainActivityPath.isEmpty) {}
+
+    // Добавим разрешение INTERNET в AndroidManifest.xml обёртки
+    final manifestPath = p.join(wrapperDir, 'app', 'src', 'main', 'AndroidManifest.xml');
+    await _createFile(manifestPath, '''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:usesCleartextTraffic="true"
+        android:label="$rawName"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+''');
+
+    final assetsWwwDir = Directory(p.join(wrapperDir, 'app', 'src', 'main', 'assets', 'www'));
+    if (await assetsWwwDir.exists()) {
+      await assetsWwwDir.delete(recursive: true);
+    }
+    await assetsWwwDir.create(recursive: true);
+
+    return wrapperDir;
+  }
+
+  /// Публичный метод: пропатчить Android build файлы уже существующего проекта.
+  /// Вызывается из UI (например, через контекстное меню проекта).
+  Future<void> patchExistingProject(Project project) async {
+    if (project.type != ProjectType.flutter) return;
+    debugPrint('[ProjectService] Patching existing project: ${project.name}');
+    await _patchAndroidBuildFiles(project.path);
+  }
+
+  /// Запустить сборку APK (Flutter, Native Android Kotlin/Java, Web/HTML/JS/Node.js) или Linux desktop.
+  Future<void> buildProject(Project project, {String? target}) async {
+    final terminal = _ref.read(terminalTabsProvider.notifier);
+    final guestPath = PathMapper.mapToGuest(project.path, _ref.read(runtimeServiceProvider).appDirectory);
+
+    if (project.type == ProjectType.flutter) {
+      final buildTarget = target ?? (Platform.isAndroid ? 'apk' : 'linux');
+      if (buildTarget == 'apk') {
+        final patchCmd = [
+          'cd "$guestPath"',
+          'flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons 2>&1',
+          '(cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk 2>/dev/null || cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ./app-release.apk 2>/dev/null || true)',
+        ].join(' && ');
+        terminal.sendCommand(patchCmd);
+      } else {
+        final buildCmd = 'cd "$guestPath" && flutter build linux --release 2>&1';
+        terminal.sendCommand(buildCmd);
+      }
+    } else if (project.type == ProjectType.androidJava || project.type == ProjectType.androidKotlin) {
+      final buildCmd = [
+        'cd "$guestPath"',
+        'chmod +x ./gradlew 2>/dev/null || true',
+        'gradlew assembleDebug 2>&1',
+        'cp app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk 2>/dev/null || true',
+      ].join(' && ');
+      terminal.sendCommand(buildCmd);
+    } else if (project.type == ProjectType.web || project.type == ProjectType.nodejs) {
+      await prepareWebApkWrapper(project.path, project.name);
+      final buildCmd = [
+        'cd "$guestPath"',
+        'if [ -f package.json ] && grep -q "\\"build\\"" package.json; then npm run build || true; fi',
+        'mkdir -p .quantum_android_apk/app/src/main/assets/www',
+        'if [ -d dist ]; then cp -r dist/* .quantum_android_apk/app/src/main/assets/www/ 2>/dev/null || true; '
+            'elif [ -d build ]; then cp -r build/* .quantum_android_apk/app/src/main/assets/www/ 2>/dev/null || true; '
+            'else find . -maxdepth 2 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.json" -o -name "*.png" -o -name "*.svg" -o -name "*.jpg" \\) ! -path "./.quantum_android_apk/*" ! -path "./node_modules/*" -exec cp --parents {} .quantum_android_apk/app/src/main/assets/www/ \\; 2>/dev/null || true; fi',
+        'cd .quantum_android_apk && chmod +x ./gradlew 2>/dev/null || true',
+        'gradlew assembleDebug 2>&1',
+        'cp app/build/outputs/apk/debug/app-debug.apk ../app-debug.apk 2>/dev/null && echo "✓ Готовый Web APK собран: ./app-debug.apk"',
+      ].join(' && ');
+      terminal.sendCommand(buildCmd);
+    } else {
+      runProject(project);
+    }
+  }
+}
+
+final projectServiceProvider = StateNotifierProvider<ProjectService, List<Project>>((Ref ref) {
+  return ProjectService(ref);
+});
+

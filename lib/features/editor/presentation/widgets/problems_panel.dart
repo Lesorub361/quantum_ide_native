@@ -1,0 +1,593 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:path/path.dart' as p;
+import 'package:quantum_ide/core/models/code_diagnostic.dart';
+import 'package:quantum_ide/core/services/workspace_service.dart';
+import 'package:quantum_ide/core/services/analysis_service.dart';
+import 'package:quantum_ide/features/editor/presentation/notifiers/editor_notifier.dart';
+import 'package:quantum_ide/l10n/app_localizations.dart';
+import 'package:quantum_ide/features/terminal/presentation/notifiers/terminal_tabs_notifier.dart';
+import 'package:quantum_ide/shared/providers/panel_provider.dart';
+import 'package:quantum_ide/core/utils/file_icon_helper.dart';
+
+/// Compact, IDE-style problems list (sidebar version).
+class ProblemsPanel extends ConsumerStatefulWidget {
+  const ProblemsPanel({super.key});
+
+  @override
+  ConsumerState<ProblemsPanel> createState() => _ProblemsPanelState();
+}
+
+class _ProblemsPanelState extends ConsumerState<ProblemsPanel> {
+  CodeDiagnosticSeverity? _filter;
+  final Set<String> _collapsed = {};
+
+  static (IconData, Color) _severityStyle(CodeDiagnosticSeverity s) {
+    switch (s) {
+      case CodeDiagnosticSeverity.error:
+        return (LucideIcons.circle_x, const Color(0xFFFF6B6B));
+      case CodeDiagnosticSeverity.warning:
+        return (LucideIcons.triangle_alert, Colors.amberAccent);
+      case CodeDiagnosticSeverity.hint:
+        return (LucideIcons.info, Colors.cyanAccent);
+    }
+  }
+
+  static String _getRussianErrorExplanation(String msg) {
+    final lower = msg.toLowerCase();
+    if (lower.contains('undefined name') || lower.contains("isn't defined")) {
+      return 'Переменная, метод или класс не найдены. Возможно, не подключен нужный import или допущена опечатка в названии.';
+    }
+    if (lower.contains("expected to find ';'") || (lower.contains('expected to find') && lower.contains(';'))) {
+      return 'Синтаксическая ошибка: пропущена точка с запятой «;» в конце инструкции.';
+    }
+    if (lower.contains('the named parameter') && lower.contains('is required')) {
+      return 'Пропущен обязательный именованный параметр. Конструктор этого виджета требует передачи всех обязательных полей.';
+    }
+    if (lower.contains("can't be assigned to the parameter type") || lower.contains('type mismatch')) {
+      return 'Несоответствие типов: передан аргумент другого типа данных. Проверьте ожидаемый тип в сигнатуре функции/виджета.';
+    }
+    if (lower.contains('dead code')) {
+      return 'Мёртвый код: этот блок кода никогда не выполнится (например, он расположен после оператора return, break или throw).';
+    }
+    if (lower.contains('unused import')) {
+      return 'Лишний импорт: этот файл или библиотека подключены, но нигде не используются в коде.';
+    }
+    if (lower.contains('cannot be null') || lower.contains('null safety') || lower.contains('nullable')) {
+      return 'Ошибка Null Safety: значение может оказаться null, хотя тип ожидает гарантированное значение (используйте ? или проверку if != null).';
+    }
+    if (lower.contains('must be initialized') || lower.contains('not initialized')) {
+      return 'Переменная не инициализирована: добавьте начальное значение или пометьте её как late.';
+    }
+    if (lower.contains('too many positional arguments') || lower.contains('too few positional arguments')) {
+      return 'Неверное количество позиционных аргументов: функции или конструктору передано больше или меньше параметров, чем объявлено.';
+    }
+    return 'Компилятор Dart/Flutter обнаружил несоответствие в коде.';
+  }
+
+  void _showErrorQuickFixDialog(BuildContext context, String filePath, String relPath, CodeDiagnostic d) {
+    final (icon, color) = _severityStyle(d.severity);
+    final explanation = _getRussianErrorExplanation(d.message);
+    final line = d.range.index + 1;
+    final col = d.range.start + 1;
+
+    String errorLineCode = '';
+    try {
+      final f = File(filePath);
+      if (f.existsSync()) {
+        final lines = f.readAsLinesSync();
+        if (d.range.index >= 0 && d.range.index < lines.length) {
+          errorLineCode = lines[d.range.index].trim();
+        }
+      }
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF141822),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${d.severity.name.toUpperCase()} (Строка $line:$col)',
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  Text(
+                    relPath,
+                    style: GoogleFonts.jetBrainsMono(fontSize: 10.5, color: Colors.white38),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Error text box
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.25)),
+                ),
+                child: Text(
+                  d.message,
+                  style: GoogleFonts.jetBrainsMono(fontSize: 11.5, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Code snippet if available
+              if (errorLineCode.isNotEmpty) ...[
+                Text(
+                  'КОД НА СТРОКЕ $line:',
+                  style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white38),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Text(
+                    errorLineCode,
+                    style: GoogleFonts.jetBrainsMono(fontSize: 11, color: Colors.amberAccent),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              // Plain-Russian explanation
+              Row(
+                children: [
+                  const Icon(LucideIcons.book_open, size: 14, color: Colors.cyanAccent),
+                  const SizedBox(width: 6),
+                  Text(
+                    'ОБЪЯСНЕНИЕ ПРОСТЫМИ СЛОВАМИ:',
+                    style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.2)),
+                ),
+                child: Text(
+                  explanation,
+                  style: GoogleFonts.inter(fontSize: 11.5, color: Colors.white70, height: 1.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: '$relPath:$line:$col  ${d.message}'));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Текст ошибки скопирован')),
+              );
+            },
+            icon: const Icon(LucideIcons.copy, size: 13),
+            label: const Text('Копировать', style: TextStyle(fontSize: 11)),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(editorProvider.notifier).openFile(filePath, line: d.range.index, column: d.range.start);
+            },
+            icon: const Icon(LucideIcons.external_link, size: 13),
+            label: const Text('Перейти', style: TextStyle(fontSize: 11)),
+          ),
+
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final allDiagnostics = ref.watch(editorProvider.select((s) => s.allDiagnostics));
+    final workspaceRoot = ref.watch(workspaceProvider.select((s) => s.currentPath ?? ''));
+    final l10n = AppLocalizations.of(context)!;
+
+    final diagnosticsMap = <String, List<CodeDiagnostic>>{};
+    int errors = 0, warnings = 0, hints = 0;
+    allDiagnostics.forEach((filePath, list) {
+      if (list.isEmpty || workspaceRoot.isEmpty || !filePath.startsWith(workspaceRoot)) return;
+      for (final d in list) {
+        switch (d.severity) {
+          case CodeDiagnosticSeverity.error:
+            errors++;
+            break;
+          case CodeDiagnosticSeverity.warning:
+            warnings++;
+            break;
+          case CodeDiagnosticSeverity.hint:
+            hints++;
+            break;
+        }
+      }
+      final filtered = _filter == null ? list : list.where((d) => d.severity == _filter).toList();
+      if (filtered.isNotEmpty) {
+        diagnosticsMap[filePath] = List<CodeDiagnostic>.from(filtered)
+          ..sort((a, b) {
+            final s = a.severity.index.compareTo(b.severity.index);
+            return s != 0 ? s : a.range.index.compareTo(b.range.index);
+          });
+      }
+    });
+
+    final total = errors + warnings + hints;
+    final filePaths = diagnosticsMap.keys.toList()..sort((a, b) => p.basename(a).compareTo(p.basename(b)));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+          child: Row(
+            children: [
+              const Icon(LucideIcons.circle_alert, size: 13, color: Colors.white54),
+              const SizedBox(width: 6),
+              Text(
+                l10n.problemsList,
+                style: GoogleFonts.inter(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 6),
+              if (total > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: (errors > 0
+                            ? const Color(0xFFFF6B6B)
+                            : (warnings > 0 ? Colors.amberAccent : Colors.white))
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    errors + warnings > 0 ? '${errors + warnings}' : '$hints инфо',
+                    style: GoogleFonts.jetBrainsMono(
+                      fontSize: 9.5,
+                      color: errors > 0
+                          ? const Color(0xFFFF6B6B)
+                          : (warnings > 0 ? Colors.amberAccent : Colors.white60),
+                    ),
+                  ),
+                ),
+              const Spacer(),
+              ValueListenableBuilder<bool>(
+                valueListenable: ref.read(analysisServiceProvider).isAnalyzingNotifier,
+                builder: (context, isAnalyzing, _) {
+                  return Tooltip(
+                    message: isAnalyzing ? 'Анализ проекта...' : 'Анализ всего проекта (dart analyze)',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: isAnalyzing
+                          ? null
+                          : () async {
+                              HapticFeedback.lightImpact();
+                              await ref.read(analysisServiceProvider).runAnalysis();
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: isAnalyzing
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 1.6),
+                              )
+                            : Icon(LucideIcons.refresh_cw, size: 12, color: Colors.white.withValues(alpha: 0.55)),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (total > 0) ...[
+                const SizedBox(width: 2),
+                Tooltip(
+                  message: 'Очистить список диагностик',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () {
+                      ref.read(editorProvider.notifier).clearDiagnostics();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(4.0),
+                      child: Icon(LucideIcons.trash_2, size: 12, color: Colors.white.withValues(alpha: 0.55)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+
+            ],
+          ),
+        ),
+        // Missing dependencies hint banner
+        if (diagnosticsMap.values.any((list) => list.any((d) =>
+            d.message.toLowerCase().contains("target of uri doesn't exist") ||
+            d.message.toLowerCase().contains("uri") ||
+            d.message.toLowerCase().contains("pub get"))))
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.amberAccent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(LucideIcons.package_search, size: 14, color: Colors.amberAccent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Не найдены зависимости проекта. Запустите:',
+                    style: GoogleFonts.inter(fontSize: 10.5, color: Colors.amberAccent, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    ref.read(terminalTabsProvider.notifier).sendCommand('flutter pub get\n');
+                    ref.read(panelProvider.notifier).selectTab(PanelTab.terminal);
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.amberAccent.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'flutter pub get',
+                      style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amberAccent),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // Filter pills
+        SizedBox(
+          height: 28,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            children: [
+              _pill('Все', total, null, Colors.white70),
+              _pill('Ошибки', errors, CodeDiagnosticSeverity.error, const Color(0xFFFF6B6B)),
+              _pill('Предупр.', warnings, CodeDiagnosticSeverity.warning, Colors.amberAccent),
+              _pill('Инфо', hints, CodeDiagnosticSeverity.hint, Colors.cyanAccent),
+            ],
+          ),
+        ),
+        Divider(color: Colors.white.withValues(alpha: 0.06), height: 8),
+        Expanded(
+          child: diagnosticsMap.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.circle_check, size: 30, color: Colors.greenAccent.withValues(alpha: 0.45)),
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.noProblemsFound,
+                        style: GoogleFonts.inter(color: Colors.white38, fontSize: 11.5),
+                      ),
+                      const SizedBox(height: 10),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: ref.read(analysisServiceProvider).isAnalyzingNotifier,
+                        builder: (context, isAnalyzing, _) {
+                          return TextButton.icon(
+                            onPressed: isAnalyzing
+                                ? null
+                                : () => ref.read(analysisServiceProvider).runAnalysis(),
+                            icon: isAnalyzing
+                                ? const SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(strokeWidth: 1.6),
+                                  )
+                                : const Icon(LucideIcons.scan_search, size: 13),
+                            label: Text(
+                              isAnalyzing ? 'Анализ...' : 'Проверить проект',
+                              style: GoogleFonts.inter(fontSize: 11),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  itemCount: filePaths.length,
+                  itemBuilder: (context, i) {
+                    final filePath = filePaths[i];
+                    final diags = diagnosticsMap[filePath]!;
+                    final relPath = p.relative(filePath, from: workspaceRoot);
+                    final dir = p.dirname(relPath);
+                    final isCollapsed = _collapsed.contains(filePath);
+                    final iconInfo = FileIconHelper.getIconInfo(p.basename(filePath), false);
+                    final fileErrors = diags.where((d) => d.severity == CodeDiagnosticSeverity.error).length;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        InkWell(
+                          onTap: () => setState(() {
+                            isCollapsed ? _collapsed.remove(filePath) : _collapsed.add(filePath);
+                          }),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            child: Row(
+                              children: [
+                                Icon(isCollapsed ? LucideIcons.chevron_right : LucideIcons.chevron_down,
+                                    size: 12, color: Colors.white38),
+                                const SizedBox(width: 4),
+                                Icon(iconInfo.icon, size: 13, color: iconInfo.color),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    p.basename(filePath),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.inter(fontSize: 11.5, color: Colors.white, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                if (dir != '.') ...[
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(dir,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(fontSize: 9.5, color: Colors.white30)),
+                                  ),
+                                ] else
+                                  const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: (fileErrors > 0 ? const Color(0xFFFF6B6B) : Colors.amberAccent)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '${diags.length}',
+                                    style: GoogleFonts.jetBrainsMono(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: fileErrors > 0 ? const Color(0xFFFF6B6B) : Colors.amberAccent,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (!isCollapsed) ...diags.map((d) => _diagRow(filePath, relPath, d)),
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _pill(String label, int count, CodeDiagnosticSeverity? severity, Color color) {
+    final selected = _filter == severity;
+    return Padding(
+      padding: const EdgeInsets.only(right: 5),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => _filter = severity),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.14) : Colors.white.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color.withValues(alpha: 0.45) : Colors.white.withValues(alpha: 0.06),
+              width: 0.7,
+            ),
+          ),
+          child: Text(
+            '$label $count',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              color: selected ? color : Colors.white54,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _diagRow(String filePath, String relPath, CodeDiagnostic d) {
+    final (icon, color) = _severityStyle(d.severity);
+    final line = d.range.index + 1;
+    final col = d.range.start + 1;
+    return InkWell(
+      onTap: () => ref.read(editorProvider.notifier).openFile(filePath, line: d.range.index, column: d.range.start),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(26, 3, 4, 3),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: color.withValues(alpha: 0.5), width: 2)),
+        ),
+        margin: const EdgeInsets.only(left: 12),
+        child: Row(
+          children: [
+            Icon(icon, size: 11.5, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                d.message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(fontSize: 11, color: Colors.white.withValues(alpha: 0.85), height: 1.25),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text('$line:$col', style: GoogleFonts.jetBrainsMono(fontSize: 9, color: Colors.white30)),
+            _miniIcon(LucideIcons.lightbulb, 'Объяснение и Quick-Fix', () => _showErrorQuickFixDialog(context, filePath, relPath, d), color: Colors.amberAccent),
+            _miniIcon(LucideIcons.copy, 'Копировать', () {
+              Clipboard.setData(ClipboardData(text: '$relPath:$line:$col  ${d.message}'));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Скопировано'), duration: Duration(milliseconds: 900)),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _miniIcon(IconData icon, String tooltip, VoidCallback onTap, {Color color = Colors.white38}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(icon, size: 11, color: color),
+        ),
+      ),
+    );
+  }
+}

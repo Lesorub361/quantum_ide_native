@@ -1,0 +1,1884 @@
+// Ported & adapted from roxum-ide (MIT License) - https://github.com/heckmon/roxum-ide
+
+import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:dio_smart_retry/dio_smart_retry.dart';
+import 'package:http/http.dart' as http;
+import 'package:quantum_ide/core/services/settings_service.dart';
+import 'package:quantum_ide/features/ai_assistant/roxum/roxum_agentic_tools.dart';
+import 'package:quantum_ide/core/services/token_counter_service.dart';
+
+enum RoxumToolCallingMethod {
+  openAiCompatible,
+  anthropicMessages,
+  geminiFunctionCalling,
+}
+
+class RoxumModelOption {
+  final String id;
+  final String name;
+  final String provider;
+  final String url;
+  final String apiKey;
+  final String model;
+  final RoxumToolCallingMethod method;
+  final bool isFree;
+
+  const RoxumModelOption({
+    required this.id,
+    required this.name,
+    required this.provider,
+    required this.url,
+    required this.apiKey,
+    required this.model,
+    required this.method,
+    this.isFree = false,
+  });
+
+  static String normalizeOpenAiBaseUrl(String raw) {
+    var base = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) return '';
+    if (base.endsWith('/chat/completions')) {
+      base = base.substring(0, base.length - '/chat/completions'.length);
+    } else if (base.endsWith('/models')) {
+      base = base.substring(0, base.length - '/models'.length);
+    }
+    base = base.replaceAll(RegExp(r'/+$'), '');
+    if (!RegExp(r'/v\d+(beta\d*)?$|/api/v\d+$').hasMatch(base)) {
+      base = '$base/v1';
+    }
+    return base;
+  }
+
+  Map<String, String> get headers {
+    switch (method) {
+      case RoxumToolCallingMethod.anthropicMessages:
+        return {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        };
+      case RoxumToolCallingMethod.geminiFunctionCalling:
+        return {'Content-Type': 'application/json'};
+      case RoxumToolCallingMethod.openAiCompatible:
+        return {
+          'Content-Type': 'application/json',
+          if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+        };
+    }
+  }
+
+  static List<RoxumModelOption> fromSettings(SettingsState settings) {
+    final list = <RoxumModelOption>[];
+    if (settings.geminiApiKey.trim().isNotEmpty) {
+      final m = settings.geminiModel.isNotEmpty
+          ? settings.geminiModel
+          : 'gemini-2.5-flash';
+      list.add(
+        RoxumModelOption(
+          id: 'gemini:$m',
+          name: m,
+          provider: 'Gemini',
+          url:
+              'https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent?key=${settings.geminiApiKey.trim()}',
+          apiKey: settings.geminiApiKey.trim(),
+          model: m,
+          method: RoxumToolCallingMethod.geminiFunctionCalling,
+        ),
+      );
+    }
+    if (settings.deepseekApiKey.trim().isNotEmpty) {
+      for (final m in ['deepseek-chat', 'deepseek-reasoner']) {
+        list.add(
+          RoxumModelOption(
+            id: 'deepseek:$m',
+            name: m,
+            provider: 'DeepSeek',
+            url: 'https://api.deepseek.com/chat/completions',
+            apiKey: settings.deepseekApiKey.trim(),
+            model: m,
+            method: RoxumToolCallingMethod.openAiCompatible,
+          ),
+        );
+      }
+    }
+    if (settings.openaiApiKey.trim().isNotEmpty) {
+      for (final m in ['gpt-4o', 'gpt-4o-mini', 'o3-mini']) {
+        list.add(
+          RoxumModelOption(
+            id: 'openai:$m',
+            name: m,
+            provider: 'OpenAI',
+            url: 'https://api.openai.com/v1/chat/completions',
+            apiKey: settings.openaiApiKey.trim(),
+            model: m,
+            method: RoxumToolCallingMethod.openAiCompatible,
+          ),
+        );
+      }
+    }
+    if (settings.anthropicApiKey.trim().isNotEmpty) {
+      for (final m in ['claude-sonnet-4-20250514', 'claude-3-5-haiku-latest']) {
+        list.add(
+          RoxumModelOption(
+            id: 'anthropic:$m',
+            name: m,
+            provider: 'Anthropic',
+            url: 'https://api.anthropic.com/v1/messages',
+            apiKey: settings.anthropicApiKey.trim(),
+            model: m,
+            method: RoxumToolCallingMethod.anthropicMessages,
+          ),
+        );
+      }
+    }
+    if (settings.openrouterApiKey.trim().isNotEmpty) {
+      for (final m in [
+        ('nvidia/nemotron-3.5-super-vl:free', true),
+        ('cohere/north-mini-code:free', true),
+        ('qwen/qwen-2.5-coder-32b-instruct', false),
+        ('anthropic/claude-3.5-sonnet', false),
+        ('google/gemini-2.5-flash', false),
+      ]) {
+        list.add(
+          RoxumModelOption(
+            id: 'openrouter:${m.$1}',
+            name: m.$1,
+            provider: 'OpenRouter',
+            url: 'https://openrouter.ai/api/v1/chat/completions',
+            apiKey: settings.openrouterApiKey.trim(),
+            model: m.$1,
+            method: RoxumToolCallingMethod.openAiCompatible,
+            isFree: m.$2,
+          ),
+        );
+      }
+    }
+    if (settings.groqApiKey.trim().isNotEmpty) {
+      list.add(
+        RoxumModelOption(
+          id: 'groq:llama-3.3-70b-versatile',
+          name: 'llama-3.3-70b-versatile',
+          provider: 'Groq',
+          url: 'https://api.groq.com/openai/v1/chat/completions',
+          apiKey: settings.groqApiKey.trim(),
+          model: 'llama-3.3-70b-versatile',
+          method: RoxumToolCallingMethod.openAiCompatible,
+        ),
+      );
+    }
+    if (settings.xaiApiKey.trim().isNotEmpty) {
+      list.add(
+        RoxumModelOption(
+          id: 'xai:grok-2-latest',
+          name: 'grok-2-latest',
+          provider: 'xAI',
+          url: 'https://api.x.ai/v1/chat/completions',
+          apiKey: settings.xaiApiKey.trim(),
+          model: 'grok-2-latest',
+          method: RoxumToolCallingMethod.openAiCompatible,
+        ),
+      );
+    }
+    if (settings.mistralApiKey.trim().isNotEmpty) {
+      list.add(
+        RoxumModelOption(
+          id: 'mistral:codestral-latest',
+          name: 'codestral-latest',
+          provider: 'Mistral',
+          url: 'https://api.mistral.ai/v1/chat/completions',
+          apiKey: settings.mistralApiKey.trim(),
+          model: 'codestral-latest',
+          method: RoxumToolCallingMethod.openAiCompatible,
+        ),
+      );
+    }
+    if (settings.customApiBaseUrl.trim().isNotEmpty &&
+        settings.customApiModel.trim().isNotEmpty) {
+      final base = normalizeOpenAiBaseUrl(settings.customApiBaseUrl);
+      list.add(
+        RoxumModelOption(
+          id: 'custom:${settings.customApiModel.trim()}',
+          name: settings.customApiModel.trim(),
+          provider: 'Local / Custom',
+          url: '$base/chat/completions',
+          apiKey: settings.customApiKey.trim(),
+          model: settings.customApiModel.trim(),
+          method: RoxumToolCallingMethod.openAiCompatible,
+          isFree: true,
+        ),
+      );
+    }
+    return list;
+  }
+}
+
+class RoxumToolCallRecord {
+  final String id;
+  final String name;
+  final Map<String, dynamic> arguments;
+  final bool isRunning;
+  final bool success;
+  final String output;
+
+  const RoxumToolCallRecord({
+    required this.id,
+    required this.name,
+    required this.arguments,
+    this.isRunning = true,
+    this.success = true,
+    this.output = '',
+  });
+
+  RoxumToolCallRecord copyWith({
+    bool? isRunning,
+    bool? success,
+    String? output,
+  }) {
+    return RoxumToolCallRecord(
+      id: id,
+      name: name,
+      arguments: arguments,
+      isRunning: isRunning ?? this.isRunning,
+      success: success ?? this.success,
+      output: output ?? this.output,
+    );
+  }
+}
+
+class RoxumAttachment {
+  final String name;
+  final String mimeType;
+  final String? base64Data;
+  final String? textContent;
+  final int sizeBytes;
+
+  const RoxumAttachment({
+    required this.name,
+    required this.mimeType,
+    this.base64Data,
+    this.textContent,
+    this.sizeBytes = 0,
+  });
+
+  bool get isImage => mimeType.startsWith('image/') && base64Data != null;
+}
+
+class RoxumUsageStats {
+  final int promptTokens;
+  final int completionTokens;
+  final int totalTokens;
+  final double costUsd;
+
+  const RoxumUsageStats({
+    this.promptTokens = 0,
+    this.completionTokens = 0,
+    this.totalTokens = 0,
+    this.costUsd = 0.0,
+  });
+
+  RoxumUsageStats operator +(RoxumUsageStats other) {
+    return RoxumUsageStats(
+      promptTokens: promptTokens + other.promptTokens,
+      completionTokens: completionTokens + other.completionTokens,
+      totalTokens: totalTokens + other.totalTokens,
+      costUsd: costUsd + other.costUsd,
+    );
+  }
+}
+
+class OpenRouterKeyLimits {
+  final String label;
+  final double? limitUsd;
+  final double? limitRemainingUsd;
+  final double usageUsd;
+  final double usageDailyUsd;
+  final double usageMonthlyUsd;
+  final bool isFreeTier;
+  final int? freeDailyUsed;
+  final int? freeDailyLimit;
+  final int? freeDailyRemaining;
+
+  const OpenRouterKeyLimits({
+    required this.label,
+    this.limitUsd,
+    this.limitRemainingUsd,
+    this.usageUsd = 0.0,
+    this.usageDailyUsd = 0.0,
+    this.usageMonthlyUsd = 0.0,
+    this.isFreeTier = false,
+    this.freeDailyUsed,
+    this.freeDailyLimit,
+    this.freeDailyRemaining,
+  });
+}
+
+class _ParsedTurn {
+  final String text;
+  final String reasoning;
+  final List<({String id, String name, Map<String, dynamic> args})> toolCalls;
+  final Map<String, dynamic> rawAssistantMessage;
+  final RoxumUsageStats usage;
+
+  const _ParsedTurn({
+    required this.text,
+    this.reasoning = '',
+    required this.toolCalls,
+    required this.rawAssistantMessage,
+    this.usage = const RoxumUsageStats(),
+  });
+}
+
+class RoxumAiClient {
+  http.Client? _client;
+
+  static final Dio _retryDio = _createRetryDio();
+
+  static Dio _createRetryDio() {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 7),
+        receiveTimeout: const Duration(seconds: 10),
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
+    dio.interceptors.add(
+      RetryInterceptor(
+        dio: dio,
+        retries: 2,
+        retryDelays: const [Duration(milliseconds: 450), Duration(seconds: 1)],
+      ),
+    );
+    return dio;
+  }
+
+  void cancel() {
+    _client?.close();
+    _client = null;
+  }
+
+  static Future<List<String>> fetchRemoteModels({
+    required String baseUrl,
+    String apiKey = '',
+  }) async {
+    final raw = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    if (raw.isEmpty) return const [];
+    final normalized = RoxumModelOption.normalizeOpenAiBaseUrl(raw);
+    final rawClean = raw.endsWith('/models')
+        ? raw
+        : (raw.endsWith('/chat/completions')
+              ? '${raw.substring(0, raw.length - '/chat/completions'.length)}/models'
+              : '$raw/models');
+    final rootBase = normalized.endsWith('/v1')
+        ? normalized.substring(0, normalized.length - 3)
+        : normalized;
+
+    final candidates = <String>{
+      '$normalized/models',
+      rawClean,
+      if (rootBase.isNotEmpty) '$rootBase/api/tags',
+    }.toList();
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (apiKey.trim().isNotEmpty) 'Authorization': 'Bearer ${apiKey.trim()}',
+    };
+
+    Object? lastError;
+    for (final url in candidates) {
+      try {
+        final res = await _retryDio.get<dynamic>(
+          url,
+          options: Options(headers: headers),
+        );
+        final status = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          lastError = Exception('HTTP $status ($url)');
+          continue;
+        }
+        final decoded = res.data is String
+            ? jsonDecode(res.data as String)
+            : res.data;
+        final ids = <String>[];
+        if (decoded is Map && decoded['data'] is List) {
+          for (final item in decoded['data'] as List) {
+            if (item is Map && item['id'] != null) {
+              ids.add(item['id'].toString());
+            }
+          }
+        } else if (decoded is Map && decoded['models'] is List) {
+          for (final item in decoded['models'] as List) {
+            if (item is Map && (item['name'] ?? item['id']) != null) {
+              ids.add((item['name'] ?? item['id']).toString());
+            }
+          }
+        }
+        if (ids.isNotEmpty) return ids;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    if (lastError != null) throw lastError;
+    return const [];
+  }
+
+  static Future<List<RoxumModelOption>> fetchAllProviderModels(
+    SettingsState settings,
+  ) async {
+    final futures = <Future<List<RoxumModelOption>>>[];
+
+    Future<List<RoxumModelOption>> fetchOpenAiStyle({
+      required String provider,
+      required String modelsUrl,
+      required String chatUrl,
+      required String apiKey,
+      bool Function(String id)? filter,
+      bool defaultFree = false,
+    }) async {
+      try {
+        final res = await _retryDio.get<dynamic>(
+          modelsUrl,
+          options: Options(
+            headers: {
+              'Content-Type': 'application/json',
+              if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+            },
+          ),
+        );
+        final status = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) return const [];
+        final decoded = res.data is String
+            ? jsonDecode(res.data as String)
+            : res.data;
+        if (decoded is! Map || decoded['data'] is! List) return const [];
+        final out = <RoxumModelOption>[];
+        for (final item in decoded['data'] as List) {
+          if (item is! Map || item['id'] == null) continue;
+          final id = item['id'].toString();
+          if (filter != null && !filter(id)) continue;
+          final pricing = item['pricing'];
+          final isFree =
+              defaultFree ||
+              id.contains(':free') ||
+              (pricing is Map && pricing['prompt']?.toString() == '0');
+          out.add(
+            RoxumModelOption(
+              id: '${provider.toLowerCase()}:$id',
+              name: item['name']?.toString() ?? id,
+              provider: provider,
+              url: chatUrl,
+              apiKey: apiKey,
+              model: id,
+              method: RoxumToolCallingMethod.openAiCompatible,
+              isFree: isFree,
+            ),
+          );
+        }
+        return out;
+      } catch (_) {
+        return const [];
+      }
+    }
+
+    if (settings.openrouterApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'OpenRouter',
+          modelsUrl: 'https://openrouter.ai/api/v1/models',
+          chatUrl: 'https://openrouter.ai/api/v1/chat/completions',
+          apiKey: settings.openrouterApiKey.trim(),
+        ).then((list) {
+          list.sort((a, b) {
+            if (a.isFree != b.isFree) return a.isFree ? -1 : 1;
+            return a.model.compareTo(b.model);
+          });
+          return list;
+        }),
+      );
+    }
+
+    if (settings.customApiBaseUrl.trim().isNotEmpty) {
+      futures.add(() async {
+        try {
+          final base = RoxumModelOption.normalizeOpenAiBaseUrl(
+            settings.customApiBaseUrl,
+          );
+          final ids = await fetchRemoteModels(
+            baseUrl: settings.customApiBaseUrl,
+            apiKey: settings.customApiKey.trim(),
+          );
+          return ids
+              .map(
+                (id) => RoxumModelOption(
+                  id: 'custom:$id',
+                  name: id,
+                  provider: 'Local / Custom',
+                  url: '$base/chat/completions',
+                  apiKey: settings.customApiKey.trim(),
+                  model: id,
+                  method: RoxumToolCallingMethod.openAiCompatible,
+                  isFree: true,
+                ),
+              )
+              .toList();
+        } catch (_) {
+          return const <RoxumModelOption>[];
+        }
+      }());
+    }
+
+    if (settings.geminiApiKey.trim().isNotEmpty) {
+      futures.add(() async {
+        final key = settings.geminiApiKey.trim();
+        try {
+          final res = await http
+              .get(
+                Uri.parse(
+                  'https://generativelanguage.googleapis.com/v1beta/models?key=$key',
+                ),
+              )
+              .timeout(const Duration(seconds: 7));
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return const <RoxumModelOption>[];
+          }
+          final decoded = jsonDecode(res.body);
+          if (decoded is! Map || decoded['models'] is! List) {
+            return const <RoxumModelOption>[];
+          }
+          final out = <RoxumModelOption>[];
+          for (final m in decoded['models'] as List) {
+            if (m is! Map) continue;
+            final methods =
+                (m['supportedGenerationMethods'] as List?) ?? const [];
+            if (!methods.contains('generateContent')) continue;
+            var id = m['name']?.toString() ?? '';
+            if (id.startsWith('models/')) id = id.substring(7);
+            if (id.isEmpty) continue;
+            out.add(
+              RoxumModelOption(
+                id: 'gemini:$id',
+                name: m['displayName']?.toString() ?? id,
+                provider: 'Gemini',
+                url:
+                    'https://generativelanguage.googleapis.com/v1beta/models/$id:generateContent?key=$key',
+                apiKey: key,
+                model: id,
+                method: RoxumToolCallingMethod.geminiFunctionCalling,
+                isFree: id.contains('flash'),
+              ),
+            );
+          }
+          return out;
+        } catch (_) {
+          return const <RoxumModelOption>[];
+        }
+      }());
+    }
+
+    if (settings.deepseekApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'DeepSeek',
+          modelsUrl: 'https://api.deepseek.com/models',
+          chatUrl: 'https://api.deepseek.com/chat/completions',
+          apiKey: settings.deepseekApiKey.trim(),
+        ),
+      );
+    }
+
+    if (settings.openaiApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'OpenAI',
+          modelsUrl: 'https://api.openai.com/v1/models',
+          chatUrl: 'https://api.openai.com/v1/chat/completions',
+          apiKey: settings.openaiApiKey.trim(),
+          filter: (id) =>
+              id.startsWith('gpt-') ||
+              id.startsWith('o1') ||
+              id.startsWith('o3') ||
+              id.startsWith('o4') ||
+              id.startsWith('chatgpt'),
+        ),
+      );
+    }
+
+    if (settings.anthropicApiKey.trim().isNotEmpty) {
+      futures.add(() async {
+        final key = settings.anthropicApiKey.trim();
+        try {
+          final res = await http
+              .get(
+                Uri.parse('https://api.anthropic.com/v1/models'),
+                headers: {'x-api-key': key, 'anthropic-version': '2023-06-01'},
+              )
+              .timeout(const Duration(seconds: 7));
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return const <RoxumModelOption>[];
+          }
+          final decoded = jsonDecode(res.body);
+          if (decoded is! Map || decoded['data'] is! List) {
+            return const <RoxumModelOption>[];
+          }
+          return (decoded['data'] as List)
+              .whereType<Map>()
+              .where((m) => m['id'] != null)
+              .map(
+                (m) => RoxumModelOption(
+                  id: 'anthropic:${m['id']}',
+                  name: m['display_name']?.toString() ?? m['id'].toString(),
+                  provider: 'Anthropic',
+                  url: 'https://api.anthropic.com/v1/messages',
+                  apiKey: key,
+                  model: m['id'].toString(),
+                  method: RoxumToolCallingMethod.anthropicMessages,
+                ),
+              )
+              .toList();
+        } catch (_) {
+          return const <RoxumModelOption>[];
+        }
+      }());
+    }
+
+    if (settings.groqApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'Groq',
+          modelsUrl: 'https://api.groq.com/openai/v1/models',
+          chatUrl: 'https://api.groq.com/openai/v1/chat/completions',
+          apiKey: settings.groqApiKey.trim(),
+          defaultFree: true,
+        ),
+      );
+    }
+
+    if (settings.xaiApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'xAI',
+          modelsUrl: 'https://api.x.ai/v1/models',
+          chatUrl: 'https://api.x.ai/v1/chat/completions',
+          apiKey: settings.xaiApiKey.trim(),
+        ),
+      );
+    }
+
+    if (settings.mistralApiKey.trim().isNotEmpty) {
+      futures.add(
+        fetchOpenAiStyle(
+          provider: 'Mistral',
+          modelsUrl: 'https://api.mistral.ai/v1/models',
+          chatUrl: 'https://api.mistral.ai/v1/chat/completions',
+          apiKey: settings.mistralApiKey.trim(),
+        ),
+      );
+    }
+
+    if (futures.isEmpty) return const [];
+    final results = await Future.wait(futures);
+    return results.expand((e) => e).toList();
+  }
+
+  static Future<OpenRouterKeyLimits> fetchOpenRouterKeyLimits(
+    String apiKey,
+  ) async {
+    final res = await http
+        .get(
+          Uri.parse('https://openrouter.ai/api/v1/key'),
+          headers: {'Authorization': 'Bearer ${apiKey.trim()}'},
+        )
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    }
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final data = (decoded['data'] as Map?)?.cast<String, dynamic>() ?? decoded;
+    final freeDaily = (data['free_model_daily_requests'] as Map?)
+        ?.cast<String, dynamic>();
+    return OpenRouterKeyLimits(
+      label: data['label']?.toString() ?? 'OpenRouter Key',
+      limitUsd: (data['limit'] as num?)?.toDouble(),
+      limitRemainingUsd: (data['limit_remaining'] as num?)?.toDouble(),
+      usageUsd: (data['usage'] as num?)?.toDouble() ?? 0.0,
+      usageDailyUsd: (data['usage_daily'] as num?)?.toDouble() ?? 0.0,
+      usageMonthlyUsd: (data['usage_monthly'] as num?)?.toDouble() ?? 0.0,
+      isFreeTier: data['is_free_tier'] == true,
+      freeDailyUsed: (freeDaily?['used'] as num?)?.toInt(),
+      freeDailyLimit: (freeDaily?['limit'] as num?)?.toInt(),
+      freeDailyRemaining: (freeDaily?['remaining'] as num?)?.toInt(),
+    );
+  }
+
+  Future<String> runAgentLoop({
+    required RoxumModelOption model,
+    required List<Map<String, dynamic>> historyMessages,
+    required List<Map<String, dynamic>> tools,
+    required RoxumAgenticTools? agenticTools,
+    required void Function(RoxumToolCallRecord record) onToolEvent,
+    required void Function(String partialText) onAssistantText,
+    void Function(String reasoningText)? onReasoningText,
+    void Function(String status)? onRetryStatus,
+    void Function(int step)? onStepStart,
+    void Function(RoxumUsageStats usage)? onUsage,
+    required bool Function() isCancelled,
+  }) async {
+    _client?.close();
+    final client = http.Client();
+    _client = client;
+
+    final messages = List<Map<String, dynamic>>.from(historyMessages);
+    const maxIterations = 48;
+    const maxVerificationFixRounds = 3;
+    var executedAnyTool = false;
+    var editedAnyFile = false;
+    var hasUnresolvedErrors = false;
+    var lastErrorCount = 0;
+    var verificationFixRounds = 0;
+    var nudgedHallucination = false;
+    var nudgedEmptyAfterTools = false;
+
+    try {
+      for (int step = 0; step < maxIterations; step++) {
+        if (isCancelled()) return '';
+        onStepStart?.call(step);
+
+        _compactMessagesForTokenSavings(messages);
+
+        final payload = _buildPayload(
+          model: model,
+          messages: messages,
+          tools: tools,
+        );
+
+        final _ParsedTurn turn;
+        if (model.method == RoxumToolCallingMethod.openAiCompatible) {
+          turn = await _sendOpenAiStreaming(
+            client: client,
+            model: model,
+            payload: payload,
+            onAssistantText: onAssistantText,
+            onReasoningText: onReasoningText,
+            isCancelled: isCancelled,
+            onRetryStatus: onRetryStatus,
+          );
+        } else {
+          final res = await client
+              .post(
+                Uri.parse(model.url),
+                headers: model.headers,
+                body: jsonEncode(payload),
+              )
+              .timeout(const Duration(seconds: 120));
+
+          if (isCancelled()) return '';
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            throw Exception('HTTP ${res.statusCode}: ${res.body}');
+          }
+
+          final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+          turn = _parseResponse(model.method, decoded);
+          if (turn.reasoning.isNotEmpty) {
+            onReasoningText?.call(turn.reasoning);
+          }
+          if (turn.text.isNotEmpty) {
+            final extracted = _splitThinkTags(turn.text);
+            if (extracted.reasoning.isNotEmpty && turn.reasoning.isEmpty) {
+              onReasoningText?.call(extracted.reasoning);
+            }
+            onAssistantText(extracted.answer);
+          }
+        }
+
+        if (isCancelled()) return '';
+
+        final effectiveTurn = turn.usage.totalTokens > 0
+            ? turn
+            : _withEstimatedUsage(turn, messages, tools);
+        if (effectiveTurn.usage.totalTokens > 0 ||
+            effectiveTurn.usage.costUsd > 0) {
+          onUsage?.call(effectiveTurn.usage);
+        }
+
+        if (effectiveTurn.toolCalls.isEmpty || agenticTools == null) {
+          final cleanAnswer = _splitThinkTags(effectiveTurn.text).answer;
+          if (agenticTools != null &&
+              tools.isNotEmpty &&
+              !executedAnyTool &&
+              !nudgedHallucination &&
+              _looksLikeFakeEditClaim(cleanAnswer)) {
+            nudgedHallucination = true;
+            messages.add({'role': 'assistant', 'content': cleanAnswer});
+            messages.add({
+              'role': 'user',
+              'content':
+                  'СТОП! Ты не вызвал ни одного инструмента (readFile / editFile / writeFile / runCommand), поэтому в проекте НИЧЕГО не изменилось. '
+                  'Не пиши отчёт о несуществующих правках — прямо сейчас вызови инструменты и реально прочитай и отредактируй файлы.',
+            });
+            continue;
+          }
+          if (agenticTools != null &&
+              editedAnyFile &&
+              hasUnresolvedErrors &&
+              verificationFixRounds < maxVerificationFixRounds) {
+            verificationFixRounds++;
+            final editedFiles = agenticTools.pendingEdits.keys
+                .map((p) => p.split(RegExp(r'[/\\]')).last)
+                .toList();
+            final filesHint = editedFiles.isEmpty
+                ? ''
+                : ' Actually edited files so far: ${editedFiles.join(', ')}.';
+            messages.add({'role': 'assistant', 'content': cleanAnswer});
+            messages.add({
+              'role': 'user',
+              'content':
+                  'VERIFICATION GATE ($verificationFixRounds/$maxVerificationFixRounds): '
+                  'The project still has $lastErrorCount unresolved compilation/analyzer error(s). '
+                  'Do NOT stop yet. Fix the errors using `editFile` (do NOT rewrite whole files with `writeFile`) '
+                  'and re-run `mcp__quantum_token_saver__smart_analyze_errors` to confirm 0 errors before giving your final answer.$filesHint',
+            });
+            continue;
+          }
+          if (agenticTools != null &&
+              cleanAnswer.trim().isEmpty &&
+              executedAnyTool) {
+            if (!nudgedEmptyAfterTools) {
+              nudgedEmptyAfterTools = true;
+              messages.add({
+                'role': 'user',
+                'content':
+                    'Ты остановился после выполнения инструментов и не написал ответ. '
+                    'Если задача не завершена — продолжи вызов инструментов. '
+                    'Если завершена или возникла ошибка — кратко напиши итог и результат.',
+              });
+              continue;
+            }
+            return 'Модель завершила шаги без текстового отчёта. Проверьте результаты выполненных шагов выше или нажмите «Продолжить выполнение».';
+          }
+          return cleanAnswer;
+        }
+
+        executedAnyTool = true;
+        messages.add(effectiveTurn.rawAssistantMessage);
+
+        for (final call in effectiveTurn.toolCalls) {
+          if (isCancelled()) return _splitThinkTags(turn.text).answer;
+
+          final runningRecord = RoxumToolCallRecord(
+            id: call.id,
+            name: call.name,
+            arguments: call.args,
+            isRunning: true,
+          );
+          onToolEvent(runningRecord);
+
+          final result = await agenticTools.execute(call.name, call.args);
+          onToolEvent(
+            runningRecord.copyWith(
+              isRunning: false,
+              success: result.success,
+              output: result.output,
+            ),
+          );
+
+          const editToolNames = {
+            'writeFile',
+            'createFile',
+            'editFile',
+            'replaceAllInFile',
+            'multiFileReplace',
+          };
+          if (editToolNames.contains(call.name) && result.success) {
+            editedAnyFile = true;
+          }
+
+          final isAnalyzerCall =
+              call.name == 'mcp__quantum_token_saver__smart_analyze_errors' ||
+              call.name == 'getLspDiagnostics' ||
+              (call.name == 'runCommand' &&
+                  (call.args['command']?.toString().contains('analyze') ??
+                      false));
+          if (isAnalyzerCall) {
+            final errCount = _countAnalyzerErrors(result.output);
+            if (errCount > 0) {
+              hasUnresolvedErrors = true;
+              lastErrorCount = errCount;
+            } else if (result.success &&
+                (result.output.contains('No issues found') ||
+                    result.output.contains('0 error(s)') ||
+                    result.output.contains('No errors'))) {
+              hasUnresolvedErrors = false;
+              lastErrorCount = 0;
+            }
+          }
+
+          messages.add({
+            'role': 'tool',
+            'tool_call_id': call.id,
+            'name': call.name,
+            'content': result.toJsonString(),
+          });
+        }
+      }
+      return 'Достигнут лимит шагов агента (48). Нажмите «Продолжить выполнение», чтобы завершить задачу.';
+    } finally {
+      if (_client == client) {
+        _client?.close();
+        _client = null;
+      }
+    }
+  }
+
+  _ParsedTurn _withEstimatedUsage(
+    _ParsedTurn turn,
+    List<Map<String, dynamic>> messages,
+    List<Map<String, dynamic>> tools,
+  ) {
+    final prompt = TokenCounterService.countTokens(
+      jsonEncode({'messages': messages, 'tools': tools}),
+    );
+    final completion = TokenCounterService.countTokens(
+      '${turn.text}\n${turn.reasoning}\n${jsonEncode(turn.toolCalls.map((e) => e.args).toList())}',
+    );
+    return _ParsedTurn(
+      text: turn.text,
+      reasoning: turn.reasoning,
+      toolCalls: turn.toolCalls,
+      rawAssistantMessage: turn.rawAssistantMessage,
+      usage: RoxumUsageStats(
+        promptTokens: prompt,
+        completionTokens: completion,
+        totalTokens: prompt + completion,
+      ),
+    );
+  }
+
+  /// Compacts older tool outputs and superseded/older `writeFile` arguments in
+  /// assistant messages so multi-step agent loops do not re-send huge file
+  /// contents on every subsequent turn.
+  void _compactMessagesForTokenSavings(List<Map<String, dynamic>> messages) {
+    compactMessagesForTokenSavings(messages);
+  }
+
+  /// Public testable compactor that replaces old `tool` outputs and old or
+  /// superseded `writeFile`/`createFile` `arguments.content` fields inside
+  /// `assistant` messages without mutating caller-owned nested maps.
+  static void compactMessagesForTokenSavings(
+    List<Map<String, dynamic>> messages,
+  ) {
+    // 1. Track latest writeFile/createFile index per filePath so superseded
+    // writes are compacted immediately even within the recent window.
+    final latestWriteByPath = <String, int>{};
+    for (int i = 0; i < messages.length; i++) {
+      final msg = messages[i];
+      if (msg['role'] != 'assistant') continue;
+      final toolCalls = msg['tool_calls'];
+      if (toolCalls is! List) continue;
+      for (final tc in toolCalls) {
+        if (tc is! Map) continue;
+        final fn = tc['function'];
+        if (fn is! Map) continue;
+        final name = fn['name']?.toString() ?? '';
+        if (name != 'writeFile' && name != 'createFile') continue;
+        final parsed = _tryDecodeArgsMap(fn['arguments']);
+        final path = parsed?['filePath']?.toString().trim() ?? '';
+        if (path.isNotEmpty) {
+          latestWriteByPath[path] = i;
+        }
+      }
+    }
+
+    // Compact assistant writeFile arguments older than the last 2 agent steps
+    // (roughly 4 messages) OR already superseded by a later write to the same file.
+    final assistantCutoff = messages.length - 4;
+    for (int i = 1; i < messages.length; i++) {
+      final msg = messages[i];
+      if (msg['role'] != 'assistant') continue;
+      final toolCalls = msg['tool_calls'];
+      if (toolCalls is! List || toolCalls.isEmpty) continue;
+
+      var changed = false;
+      final newToolCalls = <dynamic>[];
+      for (final tc in toolCalls) {
+        if (tc is! Map) {
+          newToolCalls.add(tc);
+          continue;
+        }
+        final fn = tc['function'];
+        if (fn is! Map) {
+          newToolCalls.add(tc);
+          continue;
+        }
+        final name = fn['name']?.toString() ?? '';
+        if (name != 'writeFile' && name != 'createFile') {
+          newToolCalls.add(tc);
+          continue;
+        }
+        final parsed = _tryDecodeArgsMap(fn['arguments']);
+        if (parsed == null) {
+          newToolCalls.add(tc);
+          continue;
+        }
+        final content = parsed['content']?.toString() ?? '';
+        final path = parsed['filePath']?.toString().trim() ?? '';
+        final isSuperseded =
+            path.isNotEmpty && (latestWriteByPath[path] ?? i) > i;
+        final isOld = i < assistantCutoff;
+        if ((isOld || isSuperseded) &&
+            content.length > 200 &&
+            !content.startsWith('[compacted writeFile content:')) {
+          final lineCount = content.split('\n').length;
+          final reason = isSuperseded
+              ? 'superseded by later edit'
+              : 'already on disk';
+          final compactedArgs = Map<String, dynamic>.from(parsed)
+            ..['content'] =
+                '[compacted writeFile content: $lineCount lines — $reason]';
+          final newFn = Map<String, dynamic>.from(fn)
+            ..['arguments'] = fn['arguments'] is String
+                ? jsonEncode(compactedArgs)
+                : compactedArgs;
+          final newTc = Map<String, dynamic>.from(tc)..['function'] = newFn;
+          newToolCalls.add(newTc);
+          changed = true;
+        } else {
+          newToolCalls.add(tc);
+        }
+      }
+      if (changed) {
+        messages[i] = {...msg, 'tool_calls': newToolCalls};
+      }
+    }
+
+    // 2. Compact older `role: tool` outputs beyond the most recent 6 messages.
+    if (messages.length <= 8) return;
+    final cutoff = messages.length - 6;
+    for (int i = 1; i < cutoff; i++) {
+      final msg = messages[i];
+      if (msg['role'] == 'tool') {
+        final content = msg['content']?.toString() ?? '';
+        if (content.length > 900 &&
+            !content.contains('[compacted tool output:')) {
+          final head = content.substring(0, 420);
+          final tail = content.substring(content.length - 220);
+          messages[i] = {
+            ...msg,
+            'content':
+                '$head\n...[compacted tool output: ${content.length} chars total to save tokens]...\n$tail',
+          };
+        }
+      }
+    }
+  }
+
+  static Map<String, dynamic>? _tryDecodeArgsMap(dynamic rawArgs) {
+    if (rawArgs is Map<String, dynamic>) return rawArgs;
+    if (rawArgs is Map) return Map<String, dynamic>.from(rawArgs);
+    if (rawArgs is String && rawArgs.trim().startsWith('{')) {
+      try {
+        final decoded = jsonDecode(rawArgs);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  static int _countAnalyzerErrors(String output) {
+    if (output.trim().isEmpty) return 0;
+    final summaryMatch = RegExp(
+      r'Summary:\s*(\d+)\s+error\(s\)',
+      caseSensitive: false,
+    ).firstMatch(output);
+    if (summaryMatch != null) {
+      return int.tryParse(summaryMatch.group(1) ?? '0') ?? 0;
+    }
+    var count = 0;
+    for (final line in output.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('error •') ||
+          t.contains(' error • ') ||
+          t.startsWith('Error:') ||
+          t.contains('error TS')) {
+        final multi = RegExp(r'\[(\d+)x\]').firstMatch(t);
+        count += multi != null ? (int.tryParse(multi.group(1)!) ?? 1) : 1;
+      }
+    }
+    return count;
+  }
+
+  ({String reasoning, String answer}) _splitThinkTags(String raw) {
+    final thinkRegex = RegExp(r'<think>([\s\S]*?)</think>', multiLine: true);
+    final matches = thinkRegex.allMatches(raw).toList();
+    if (matches.isEmpty) {
+      final openIdx = raw.indexOf('<think>');
+      if (openIdx != -1) {
+        return (
+          reasoning: raw.substring(openIdx + 7).trim(),
+          answer: raw.substring(0, openIdx).trim(),
+        );
+      }
+      return (reasoning: '', answer: raw);
+    }
+    final reasoning = matches.map((m) => m.group(1)?.trim() ?? '').join('\n\n');
+    final answer = raw.replaceAll(thinkRegex, '').trim();
+    return (reasoning: reasoning, answer: answer);
+  }
+
+  Future<_ParsedTurn> _sendOpenAiStreaming({
+    required http.Client client,
+    required RoxumModelOption model,
+    required Map<String, dynamic> payload,
+    required void Function(String partialText) onAssistantText,
+    void Function(String reasoningText)? onReasoningText,
+    required bool Function() isCancelled,
+    void Function(String status)? onRetryStatus,
+  }) async {
+    final uri = Uri.parse(model.url);
+    final isLocalEndpoint =
+        uri.host == 'localhost' ||
+        uri.host == '127.0.0.1' ||
+        uri.host.startsWith('192.168.') ||
+        uri.host.startsWith('10.');
+    final streamPayload = Map<String, dynamic>.from(payload)
+      ..['stream'] = true
+      ..addAll(
+        isLocalEndpoint
+            ? const <String, dynamic>{}
+            : const {
+                'stream_options': {'include_usage': true},
+              },
+      );
+
+    http.StreamedResponse streamed;
+    for (var attempt = 0; ; attempt++) {
+      final req = http.Request('POST', uri)
+        ..headers.addAll(model.headers)
+        ..body = jsonEncode(streamPayload);
+      streamed = await client.send(req).timeout(const Duration(seconds: 90));
+      final retryable = const {
+        429,
+        500,
+        502,
+        503,
+        504,
+      }.contains(streamed.statusCode);
+      if (!retryable || attempt >= 4) break;
+      final retryBody = await streamed.stream.bytesToString();
+      final wait = _retryDelay(streamed.headers, attempt);
+      onRetryStatus?.call('Лимит API, повтор через ${wait.inSeconds} сек...');
+      for (var left = wait.inMilliseconds; left > 0 && !isCancelled();) {
+        final slice = left < 250 ? left : 250;
+        await Future<void>.delayed(Duration(milliseconds: slice));
+        left -= slice;
+      }
+      if (isCancelled()) {
+        return const _ParsedTurn(
+          text: '',
+          toolCalls: [],
+          rawAssistantMessage: {},
+        );
+      }
+      if (retryBody.isEmpty) continue;
+    }
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final errBody = await streamed.stream.bytesToString();
+      // Retry once without stream if endpoint rejects stream_options
+      if (streamed.statusCode == 400 || streamed.statusCode == 422) {
+        final fallbackRes = await client
+            .post(
+              Uri.parse(model.url),
+              headers: model.headers,
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 90));
+        if (fallbackRes.statusCode >= 200 && fallbackRes.statusCode < 300) {
+          final decoded = jsonDecode(fallbackRes.body) as Map<String, dynamic>;
+          final parsed = _parseResponse(model.method, decoded);
+          final split = _splitThinkTags(parsed.text);
+          if (split.reasoning.isNotEmpty) {
+            onReasoningText?.call(split.reasoning);
+          }
+          if (split.answer.isNotEmpty) onAssistantText(split.answer);
+          return parsed;
+        }
+      }
+      throw Exception('HTTP ${streamed.statusCode}: $errBody');
+    }
+
+    final contentType = streamed.headers['content-type'] ?? '';
+    if (!contentType.contains('text/event-stream')) {
+      final body = await streamed.stream.bytesToString();
+      final decoded = jsonDecode(body) as Map<String, dynamic>;
+      final parsed = _parseResponse(model.method, decoded);
+      final split = _splitThinkTags(parsed.text);
+      if (split.reasoning.isNotEmpty) onReasoningText?.call(split.reasoning);
+      if (split.answer.isNotEmpty) onAssistantText(split.answer);
+      return parsed;
+    }
+
+    final contentBuf = StringBuffer();
+    final reasoningBuf = StringBuffer();
+    final toolBuffers =
+        <int, ({StringBuffer id, StringBuffer name, StringBuffer args})>{};
+    RoxumUsageStats usage = const RoxumUsageStats();
+
+    var lineCarry = '';
+    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+      if (isCancelled()) break;
+      final combined = lineCarry + chunk;
+      final lines = combined.split('\n');
+      lineCarry = lines.removeLast();
+
+      for (final rawLine in lines) {
+        final line = rawLine.trim();
+        if (!line.startsWith('data:')) continue;
+        final dataStr = line.substring(5).trim();
+        if (dataStr.isEmpty || dataStr == '[DONE]') continue;
+
+        try {
+          final json = jsonDecode(dataStr) as Map<String, dynamic>;
+          final u = (json['usage'] as Map?)?.cast<String, dynamic>();
+          if (u != null) {
+            final pTok = (u['prompt_tokens'] as num?)?.toInt() ?? 0;
+            final cTok = (u['completion_tokens'] as num?)?.toInt() ?? 0;
+            final tTok = (u['total_tokens'] as num?)?.toInt() ?? (pTok + cTok);
+            final cost = (u['cost'] as num?)?.toDouble() ?? 0.0;
+            usage = RoxumUsageStats(
+              promptTokens: pTok,
+              completionTokens: cTok,
+              totalTokens: tTok,
+              costUsd: cost,
+            );
+          }
+
+          final choices = (json['choices'] as List?) ?? const [];
+          if (choices.isEmpty) continue;
+          final delta = (choices.first['delta'] as Map?)
+              ?.cast<String, dynamic>();
+          if (delta == null) continue;
+
+          final reasoning = delta['reasoning']?.toString();
+          final reasoningContent = delta['reasoning_content']?.toString();
+          final rDelta = (reasoning != null && reasoning.isNotEmpty)
+              ? reasoning
+              : ((reasoningContent != null && reasoningContent.isNotEmpty)
+                    ? reasoningContent
+                    : delta['thought']?.toString());
+          if (rDelta != null && rDelta.isNotEmpty) {
+            reasoningBuf.write(rDelta);
+            onReasoningText?.call(reasoningBuf.toString());
+          }
+          final rDetails = delta['reasoning_details'];
+          if ((rDelta == null || rDelta.isEmpty) && rDetails is List) {
+            final buf = StringBuffer();
+            for (final item in rDetails) {
+              if (item is Map) {
+                final t =
+                    item['text']?.toString() ?? item['summary']?.toString();
+                if (t != null && t.isNotEmpty) buf.write(t);
+              }
+            }
+            if (buf.isNotEmpty) {
+              reasoningBuf.write(buf.toString());
+              onReasoningText?.call(reasoningBuf.toString());
+            }
+          }
+
+          final cDelta = delta['content']?.toString();
+          if (cDelta != null && cDelta.isNotEmpty) {
+            contentBuf.write(cDelta);
+            final split = _splitThinkTags(contentBuf.toString());
+            if (split.reasoning.isNotEmpty && reasoningBuf.isEmpty) {
+              onReasoningText?.call(split.reasoning);
+            }
+            onAssistantText(split.answer);
+          }
+
+          final tcList = delta['tool_calls'];
+          if (tcList is List) {
+            for (final item in tcList) {
+              if (item is! Map) continue;
+              final rawId = item['id']?.toString() ?? '';
+              int idx;
+              if (item['index'] is num) {
+                idx = (item['index'] as num).toInt();
+              } else if (rawId.isNotEmpty) {
+                final existingIdx = toolBuffers.entries
+                    .where((e) => e.value.id.toString() == rawId)
+                    .map((e) => e.key)
+                    .firstOrNull;
+                idx =
+                    existingIdx ??
+                    (toolBuffers.isEmpty
+                        ? 0
+                        : (toolBuffers.keys.reduce((a, b) => a > b ? a : b) +
+                              1));
+              } else {
+                idx = toolBuffers.isEmpty
+                    ? 0
+                    : toolBuffers.keys.reduce((a, b) => a > b ? a : b);
+              }
+              final entry = toolBuffers.putIfAbsent(
+                idx,
+                () => (
+                  id: StringBuffer(),
+                  name: StringBuffer(),
+                  args: StringBuffer(),
+                ),
+              );
+              if (rawId.isNotEmpty && entry.id.isEmpty) entry.id.write(rawId);
+              final fn = item['function'] as Map?;
+              if (fn != null) {
+                if (fn['name'] != null) entry.name.write(fn['name'].toString());
+                final rawArgChunk = fn['arguments'];
+                if (rawArgChunk is Map) {
+                  entry.args.write(jsonEncode(rawArgChunk));
+                } else if (rawArgChunk != null) {
+                  entry.args.write(rawArgChunk.toString());
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    final calls = <({String id, String name, Map<String, dynamic> args})>[];
+    final rawCalls = <Map<String, dynamic>>[];
+    final sortedKeys = toolBuffers.keys.toList()..sort();
+    for (final idx in sortedKeys) {
+      final buf = toolBuffers[idx]!;
+      final id = buf.id.isNotEmpty ? buf.id.toString() : 'call_$idx';
+      final name = buf.name.toString();
+      final rawArgs = buf.args.isNotEmpty ? buf.args.toString() : '{}';
+      Map<String, dynamic> parsedArgs = {};
+      try {
+        final d = jsonDecode(rawArgs);
+        if (d is Map<String, dynamic>) parsedArgs = d;
+      } catch (_) {}
+      if (name.isNotEmpty) {
+        calls.add((id: id, name: name, args: parsedArgs));
+        rawCalls.add({
+          'id': id,
+          'type': 'function',
+          'function': {'name': name, 'arguments': rawArgs},
+        });
+      }
+    }
+
+    final finalSplit = _splitThinkTags(contentBuf.toString());
+    return _ParsedTurn(
+      text: finalSplit.answer,
+      toolCalls: calls,
+      rawAssistantMessage: {
+        'role': 'assistant',
+        'content': (finalSplit.answer.isEmpty && rawCalls.isNotEmpty)
+            ? null
+            : finalSplit.answer,
+        if (rawCalls.isNotEmpty) 'tool_calls': rawCalls,
+      },
+      usage: usage,
+    );
+  }
+
+  Duration _retryDelay(Map<String, String> headers, int attempt) {
+    final retryAfter = headers['retry-after'];
+    final reset = headers['x-ratelimit-reset'];
+    var seconds = double.tryParse(retryAfter ?? '') ?? 0;
+    if (seconds <= 0 && reset != null) {
+      final value = double.tryParse(reset);
+      if (value != null) {
+        final millis = value > 1e12 ? value : value * 1000;
+        seconds = (millis - DateTime.now().millisecondsSinceEpoch) / 1000;
+      }
+    }
+    if (seconds <= 0) {
+      seconds = [3, 6, 12, 24, 45][attempt.clamp(0, 4)].toDouble();
+    }
+    return Duration(seconds: seconds.ceil().clamp(2, 65));
+  }
+
+  Map<String, dynamic> _buildPayload({
+    required RoxumModelOption model,
+    required List<Map<String, dynamic>> messages,
+    required List<Map<String, dynamic>> tools,
+  }) {
+    switch (model.method) {
+      case RoxumToolCallingMethod.anthropicMessages:
+        final systemPrompts = messages
+            .where((m) => m['role'] == 'system')
+            .map((m) => m['content']?.toString() ?? '')
+            .where((t) => t.isNotEmpty)
+            .join('\n\n');
+        final nonSystem = messages.where((m) => m['role'] != 'system').toList();
+        return {
+          'model': model.model,
+          'max_tokens': 4096,
+          if (systemPrompts.isNotEmpty) 'system': systemPrompts,
+          'messages': _toAnthropicMessages(nonSystem),
+          if (tools.isNotEmpty) 'tools': _toAnthropicTools(tools),
+        };
+      case RoxumToolCallingMethod.geminiFunctionCalling:
+        final systemPrompts = messages
+            .where((m) => m['role'] == 'system')
+            .map((m) => m['content']?.toString() ?? '')
+            .where((t) => t.isNotEmpty)
+            .join('\n\n');
+        final nonSystem = messages.where((m) => m['role'] != 'system').toList();
+        return {
+          'contents': _toGeminiContents(nonSystem),
+          if (systemPrompts.isNotEmpty)
+            'systemInstruction': {
+              'parts': [
+                {'text': systemPrompts},
+              ],
+            },
+          if (tools.isNotEmpty)
+            'tools': [
+              {'functionDeclarations': _toGeminiFunctionDeclarations(tools)},
+            ],
+        };
+      case RoxumToolCallingMethod.openAiCompatible:
+        return {
+          'model': model.model,
+          'messages': messages,
+          if (tools.isNotEmpty) 'tools': tools,
+          if (tools.isNotEmpty) 'tool_choice': 'auto',
+        };
+    }
+  }
+
+  static final _fakeEditRegex = RegExp(
+    r'(прочитал|внёс\s+правки|правки\s+применены|вот\s+что\s+сделано|добавил|убрал|исправил|переписал|обновил|edited|applied|updated\s+the\s+file|changes\s+made)',
+    caseSensitive: false,
+  );
+
+  bool _looksLikeFakeEditClaim(String text) {
+    if (text.trim().isEmpty) return false;
+    return _fakeEditRegex.hasMatch(text);
+  }
+
+  _ParsedTurn _parseResponse(
+    RoxumToolCallingMethod method,
+    Map<String, dynamic> json,
+  ) {
+    switch (method) {
+      case RoxumToolCallingMethod.openAiCompatible:
+        final msg =
+            (json['choices'] as List).first['message'] as Map<String, dynamic>;
+        final text = msg['content']?.toString() ?? '';
+        var reasoning =
+            msg['reasoning_content']?.toString() ??
+            msg['reasoning']?.toString() ??
+            '';
+        if (reasoning.isEmpty && msg['reasoning_details'] is List) {
+          final rBuf = StringBuffer();
+          for (final item in (msg['reasoning_details'] as List)) {
+            if (item is Map) {
+              final t = item['text']?.toString() ?? item['summary']?.toString();
+              if (t != null && t.isNotEmpty) rBuf.write(t);
+            }
+          }
+          reasoning = rBuf.toString();
+        }
+        final calls = <({String id, String name, Map<String, dynamic> args})>[];
+        final rawCalls = msg['tool_calls'] as List?;
+        if (rawCalls != null) {
+          for (final item in rawCalls) {
+            if (item is! Map) continue;
+            final fn = item['function'] as Map?;
+            if (fn == null) continue;
+            final id = item['id']?.toString() ?? 'call_${calls.length}';
+            final name = fn['name']?.toString() ?? '';
+            final rawArgs = fn['arguments']?.toString() ?? '{}';
+            Map<String, dynamic> parsedArgs = {};
+            try {
+              final d = jsonDecode(rawArgs);
+              if (d is Map<String, dynamic>) parsedArgs = d;
+            } catch (_) {}
+            if (name.isNotEmpty) {
+              calls.add((id: id, name: name, args: parsedArgs));
+            }
+          }
+        }
+        final openAiUsage = (json['usage'] as Map?)?.cast<String, dynamic>();
+        final oPrompt = (openAiUsage?['prompt_tokens'] as num?)?.toInt() ?? 0;
+        final oComp = (openAiUsage?['completion_tokens'] as num?)?.toInt() ?? 0;
+        final oTotal =
+            (openAiUsage?['total_tokens'] as num?)?.toInt() ??
+            (oPrompt + oComp);
+        final oCost = (openAiUsage?['cost'] as num?)?.toDouble() ?? 0.0;
+        return _ParsedTurn(
+          text: text,
+          reasoning: reasoning,
+          toolCalls: calls,
+          rawAssistantMessage: {
+            'role': 'assistant',
+            'content': (text.isEmpty && rawCalls != null && rawCalls.isNotEmpty)
+                ? null
+                : text,
+            if (rawCalls != null && rawCalls.isNotEmpty) 'tool_calls': rawCalls,
+          },
+          usage: RoxumUsageStats(
+            promptTokens: oPrompt,
+            completionTokens: oComp,
+            totalTokens: oTotal,
+            costUsd: oCost,
+          ),
+        );
+
+      case RoxumToolCallingMethod.anthropicMessages:
+        final blocks = (json['content'] as List?) ?? const [];
+        final textBuf = StringBuffer();
+        final reasonBuf = StringBuffer();
+        final calls = <({String id, String name, Map<String, dynamic> args})>[];
+        final rawToolCalls = <Map<String, dynamic>>[];
+        for (final b in blocks) {
+          if (b is! Map) continue;
+          if (b['type'] == 'thinking') {
+            reasonBuf.write(b['thinking']?.toString() ?? '');
+          } else if (b['type'] == 'text') {
+            textBuf.write(b['text']?.toString() ?? '');
+          } else if (b['type'] == 'tool_use') {
+            final id = b['id']?.toString() ?? 'tool_${calls.length}';
+            final name = b['name']?.toString() ?? '';
+            final input = (b['input'] as Map?)?.cast<String, dynamic>() ?? {};
+            calls.add((id: id, name: name, args: input));
+            rawToolCalls.add({
+              'id': id,
+              'type': 'function',
+              'function': {'name': name, 'arguments': jsonEncode(input)},
+            });
+          }
+        }
+        final antUsage = (json['usage'] as Map?)?.cast<String, dynamic>();
+        final aIn = (antUsage?['input_tokens'] as num?)?.toInt() ?? 0;
+        final aOut = (antUsage?['output_tokens'] as num?)?.toInt() ?? 0;
+        return _ParsedTurn(
+          text: textBuf.toString(),
+          reasoning: reasonBuf.toString(),
+          toolCalls: calls,
+          rawAssistantMessage: {
+            'role': 'assistant',
+            'content': textBuf.toString(),
+            if (rawToolCalls.isNotEmpty) 'tool_calls': rawToolCalls,
+          },
+          usage: RoxumUsageStats(
+            promptTokens: aIn,
+            completionTokens: aOut,
+            totalTokens: aIn + aOut,
+          ),
+        );
+
+      case RoxumToolCallingMethod.geminiFunctionCalling:
+        final candidates = (json['candidates'] as List?) ?? const [];
+        if (candidates.isEmpty) {
+          return const _ParsedTurn(
+            text: '',
+            toolCalls: [],
+            rawAssistantMessage: {'role': 'assistant', 'content': ''},
+          );
+        }
+        final parts =
+            (candidates.first['content']?['parts'] as List?) ?? const [];
+        final textBuf = StringBuffer();
+        final reasonBuf = StringBuffer();
+        final calls = <({String id, String name, Map<String, dynamic> args})>[];
+        final rawToolCalls = <Map<String, dynamic>>[];
+        for (final part in parts) {
+          if (part is! Map) continue;
+          if (part['thought'] == true && part['text'] != null) {
+            reasonBuf.write(part['text'].toString());
+          } else if (part['text'] != null) {
+            textBuf.write(part['text'].toString());
+          } else if (part['functionCall'] is Map) {
+            final fc = part['functionCall'] as Map;
+            final name = fc['name']?.toString() ?? '';
+            final args = (fc['args'] as Map?)?.cast<String, dynamic>() ?? {};
+            final id = 'gem_${calls.length}_$name';
+            calls.add((id: id, name: name, args: args));
+            rawToolCalls.add({
+              'id': id,
+              'type': 'function',
+              'function': {'name': name, 'arguments': jsonEncode(args)},
+            });
+          }
+        }
+        final gemUsage = (json['usageMetadata'] as Map?)
+            ?.cast<String, dynamic>();
+        final gIn = (gemUsage?['promptTokenCount'] as num?)?.toInt() ?? 0;
+        final gOut = (gemUsage?['candidatesTokenCount'] as num?)?.toInt() ?? 0;
+        final gTotal =
+            (gemUsage?['totalTokenCount'] as num?)?.toInt() ?? (gIn + gOut);
+        return _ParsedTurn(
+          text: textBuf.toString(),
+          reasoning: reasonBuf.toString(),
+          toolCalls: calls,
+          rawAssistantMessage: {
+            'role': 'assistant',
+            'content': textBuf.toString(),
+            if (rawToolCalls.isNotEmpty) 'tool_calls': rawToolCalls,
+          },
+          usage: RoxumUsageStats(
+            promptTokens: gIn,
+            completionTokens: gOut,
+            totalTokens: gTotal,
+          ),
+        );
+    }
+  }
+
+  List<Map<String, dynamic>> _toAnthropicTools(
+    List<Map<String, dynamic>> tools,
+  ) {
+    return tools.map((t) {
+      final fn = t['function'] as Map<String, dynamic>;
+      return {
+        'name': fn['name'],
+        'description': fn['description'],
+        'input_schema': fn['parameters'],
+      };
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _toAnthropicMessages(
+    List<Map<String, dynamic>> msgs,
+  ) {
+    final out = <Map<String, dynamic>>[];
+    for (final m in msgs) {
+      final role = m['role']?.toString() ?? 'user';
+      if (role == 'tool') {
+        out.add({
+          'role': 'user',
+          'content': [
+            {
+              'type': 'tool_result',
+              'tool_use_id': m['tool_call_id'],
+              'content': m['content']?.toString() ?? '',
+            },
+          ],
+        });
+      } else if (role == 'assistant' && m['tool_calls'] is List) {
+        final blocks = <Map<String, dynamic>>[];
+        final text = m['content']?.toString() ?? '';
+        if (text.isNotEmpty) blocks.add({'type': 'text', 'text': text});
+        for (final tc in m['tool_calls'] as List) {
+          final fn = tc['function'] as Map;
+          Map<String, dynamic> args = {};
+          try {
+            args =
+                jsonDecode(fn['arguments'].toString()) as Map<String, dynamic>;
+          } catch (_) {}
+          blocks.add({
+            'type': 'tool_use',
+            'id': tc['id'],
+            'name': fn['name'],
+            'input': args,
+          });
+        }
+        out.add({'role': 'assistant', 'content': blocks});
+      } else {
+        final rawContent = m['content'];
+        if (rawContent is List) {
+          final blocks = <Map<String, dynamic>>[];
+          for (final item in rawContent) {
+            if (item is! Map) continue;
+            if (item['type'] == 'text') {
+              blocks.add({
+                'type': 'text',
+                'text': item['text']?.toString() ?? '',
+              });
+            } else if (item['type'] == 'image_url') {
+              final url = (item['image_url'] as Map?)?['url']?.toString() ?? '';
+              final match = RegExp(
+                r'^data:([^;]+);base64,(.+)$',
+              ).firstMatch(url);
+              if (match != null) {
+                blocks.add({
+                  'type': 'image',
+                  'source': {
+                    'type': 'base64',
+                    'media_type': match.group(1)!,
+                    'data': match.group(2)!,
+                  },
+                });
+              }
+            }
+          }
+          out.add({
+            'role': role == 'assistant' ? 'assistant' : 'user',
+            'content': blocks,
+          });
+        } else {
+          out.add({
+            'role': role == 'assistant' ? 'assistant' : 'user',
+            'content': rawContent?.toString() ?? '',
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  List<Map<String, dynamic>> _toGeminiFunctionDeclarations(
+    List<Map<String, dynamic>> tools,
+  ) {
+    return tools.map((t) {
+      final fn = t['function'] as Map<String, dynamic>;
+      final rawParams = fn['parameters'];
+      Map<String, dynamic>? sanitizedParams;
+      if (rawParams is Map) {
+        final props = rawParams['properties'];
+        if (props is Map && props.isNotEmpty) {
+          final cleanProps = <String, dynamic>{};
+          props.forEach((k, v) {
+            if (v is Map) {
+              cleanProps[k.toString()] = _sanitizeGeminiSchemaNode(
+                v.cast<String, dynamic>(),
+              );
+            }
+          });
+          if (cleanProps.isNotEmpty) {
+            sanitizedParams = {
+              'type': 'OBJECT',
+              'properties': cleanProps,
+              if (rawParams['required'] is List &&
+                  (rawParams['required'] as List).isNotEmpty)
+                'required': List<String>.from(
+                  (rawParams['required'] as List)
+                      .map((e) => e.toString())
+                      .where(cleanProps.containsKey),
+                ),
+            };
+          }
+        }
+      }
+      return {
+        'name': fn['name'],
+        'description': fn['description'],
+        ...?sanitizedParams == null ? null : {'parameters': sanitizedParams},
+      };
+    }).toList();
+  }
+
+  Map<String, dynamic> _sanitizeGeminiSchemaNode(Map<String, dynamic> node) {
+    final rawType = (node['type']?.toString() ?? 'string').toUpperCase();
+    final type =
+        const {
+          'STRING',
+          'NUMBER',
+          'INTEGER',
+          'BOOLEAN',
+          'ARRAY',
+          'OBJECT',
+        }.contains(rawType)
+        ? rawType
+        : 'STRING';
+    final out = <String, dynamic>{
+      'type': type,
+      if (node['description'] != null)
+        'description': node['description'].toString(),
+      if (node['enum'] is List && type == 'STRING')
+        'enum': (node['enum'] as List).map((e) => e.toString()).toList(),
+    };
+    if (type == 'ARRAY') {
+      final items = node['items'];
+      out['items'] = (items is Map)
+          ? _sanitizeGeminiSchemaNode(items.cast<String, dynamic>())
+          : {'type': 'STRING'};
+    } else if (type == 'OBJECT' && node['properties'] is Map) {
+      final childProps = <String, dynamic>{};
+      (node['properties'] as Map).forEach((k, v) {
+        if (v is Map) {
+          childProps[k.toString()] = _sanitizeGeminiSchemaNode(
+            v.cast<String, dynamic>(),
+          );
+        }
+      });
+      if (childProps.isNotEmpty) {
+        out['properties'] = childProps;
+      }
+    }
+    return out;
+  }
+
+  List<Map<String, dynamic>> _toGeminiContents(
+    List<Map<String, dynamic>> msgs,
+  ) {
+    final out = <Map<String, dynamic>>[];
+    for (final m in msgs) {
+      final role = m['role']?.toString() ?? 'user';
+      if (role == 'tool') {
+        Map<String, dynamic> resp = {'result': m['content']?.toString() ?? ''};
+        try {
+          final d = jsonDecode(m['content'].toString());
+          if (d is Map<String, dynamic>) resp = d;
+        } catch (_) {}
+        out.add({
+          'role': 'function',
+          'parts': [
+            {
+              'functionResponse': {
+                'name': m['name']?.toString() ?? 'tool',
+                'response': resp,
+              },
+            },
+          ],
+        });
+      } else if (role == 'assistant' && m['tool_calls'] is List) {
+        final parts = <Map<String, dynamic>>[];
+        final text = m['content']?.toString() ?? '';
+        if (text.isNotEmpty) parts.add({'text': text});
+        for (final tc in m['tool_calls'] as List) {
+          final fn = tc['function'] as Map;
+          Map<String, dynamic> args = {};
+          try {
+            args =
+                jsonDecode(fn['arguments'].toString()) as Map<String, dynamic>;
+          } catch (_) {}
+          parts.add({
+            'functionCall': {'name': fn['name'], 'args': args},
+          });
+        }
+        out.add({'role': 'model', 'parts': parts});
+      } else {
+        final rawContent = m['content'];
+        if (rawContent is List) {
+          final parts = <Map<String, dynamic>>[];
+          for (final item in rawContent) {
+            if (item is! Map) continue;
+            if (item['type'] == 'text') {
+              parts.add({'text': item['text']?.toString() ?? ''});
+            } else if (item['type'] == 'image_url') {
+              final url = (item['image_url'] as Map?)?['url']?.toString() ?? '';
+              final match = RegExp(
+                r'^data:([^;]+);base64,(.+)$',
+              ).firstMatch(url);
+              if (match != null) {
+                parts.add({
+                  'inlineData': {
+                    'mimeType': match.group(1)!,
+                    'data': match.group(2)!,
+                  },
+                });
+              }
+            }
+          }
+          out.add({
+            'role': role == 'assistant' ? 'model' : 'user',
+            'parts': parts,
+          });
+        } else {
+          out.add({
+            'role': role == 'assistant' ? 'model' : 'user',
+            'parts': [
+              {'text': rawContent?.toString() ?? ''},
+            ],
+          });
+        }
+      }
+    }
+    return out;
+  }
+}

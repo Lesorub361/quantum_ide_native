@@ -1,0 +1,2163 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:quantum_ide/core/services/package_service.dart';
+import 'package:quantum_ide/models/optional_package.dart';
+import 'package:quantum_ide/core/services/pub_package_service.dart';
+import 'package:quantum_ide/models/pub_package.dart';
+import 'package:quantum_ide/features/terminal/presentation/notifiers/terminal_tabs_notifier.dart';
+import 'package:quantum_ide/core/services/workspace_service.dart';
+import 'package:quantum_ide/l10n/app_localizations.dart';
+import 'package:quantum_ide/features/home/presentation/widgets/package_install_dialog.dart';
+import 'package:quantum_ide/features/home/presentation/widgets/package_details_dialog.dart';
+import 'package:quantum_ide/core/services/cli_installer_service.dart';
+import 'package:quantum_ide/core/services/runtime_service.dart';
+import 'package:quantum_ide/core/utils/path_mapper.dart';
+
+class PackagePage extends ConsumerStatefulWidget {
+  const PackagePage({super.key});
+
+  @override
+  ConsumerState<PackagePage> createState() => _PackagePageState();
+}
+
+class _PackagePageState extends ConsumerState<PackagePage> with SingleTickerProviderStateMixin {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  late TabController _tabController;
+  Future<Map<String, String>>? _envInfoFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 7, vsync: this);
+    _envInfoFuture = ref.read(runtimeServiceProvider).inspectEnvironment();
+    _tabController.addListener(() {
+      setState(() {
+        _searchQuery = '';
+        _searchController.clear();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Widget _buildPackageList(BuildContext context, WidgetRef ref, String tabType) {
+    final allPackages = ref.watch(packageServiceProvider);
+    
+    final filtered = allPackages.where((pkg) {
+      final matchesSearch = pkg.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+                            pkg.description.toLowerCase().contains(_searchQuery.toLowerCase());
+      
+      bool matchesTab;
+      switch (tabType) {
+        case 'all':
+          matchesTab = true;
+          break;
+        case 'installed':
+          matchesTab = pkg.isInstalled;
+          break;
+        case 'languages_ai':
+          matchesTab = pkg.category == 'Languages' || pkg.category == 'AI Tools';
+          break;
+        case 'tools':
+          matchesTab = pkg.category == 'Tools' || pkg.category == 'Frameworks' || pkg.category == 'Web' || pkg.category == 'IDE Plugins';
+          break;
+        case 'build_system':
+          matchesTab = pkg.category == 'System' || pkg.category == 'Build Tools';
+          break;
+        case 'sdk_platforms':
+          matchesTab = pkg.category == 'SDK Platforms';
+          break;
+        default:
+          matchesTab = true;
+      }
+      return matchesSearch && matchesTab;
+    }).toList();
+
+    final theme = Theme.of(context);
+    
+    final showCliAgentsHero = (tabType == 'all' || tabType == 'languages_ai') && _searchQuery.isEmpty;
+    final showVulkanHero = (tabType == 'all' || tabType == 'build_system') &&
+        allPackages.any((p) => p.id == 'vulkan-graphics' && !p.isInstalled) &&
+        _searchQuery.isEmpty;
+    final showSdkHero = (tabType == 'all' || tabType == 'build_system') && 
+        allPackages.any((p) => p.id == 'android-sdk' && !p.isInstalled) &&
+        _searchQuery.isEmpty;
+    final showFixHero = (tabType == 'all' || tabType == 'build_system') &&
+        allPackages.any((p) => p.id == 'build-fix' && !p.isInstalled) &&
+        _searchQuery.isEmpty;
+    final showReleaseEngineHero = (tabType == 'all' || tabType == 'build_system') &&
+        allPackages.any((p) => (p.id == 'flutter-release-engine' || p.id == 'flutter-release-fix') && !p.isInstalled) &&
+        _searchQuery.isEmpty;
+
+    final List<Widget> headers = [];
+    if (tabType == 'all' && _searchQuery.isEmpty) {
+      headers.add(_buildEnvironmentHeroCard(context, ref));
+      headers.add(_buildSystemCleanerCard(context, ref));
+    }
+    if (showReleaseEngineHero) {
+      headers.add(_buildReleaseEngineHeroCard(context, ref));
+    }
+    if (showVulkanHero) {
+      headers.add(_buildVulkanHeroCard(context, ref));
+    }
+    if (showCliAgentsHero) {
+      headers.add(_buildCliAgentsHeroCard(context, ref));
+    }
+    if (showSdkHero) {
+      headers.add(_buildSDKHeroCard(context, ref));
+    }
+    if (showFixHero) {
+      headers.add(_buildBuildFixHeroCard(context, ref));
+    }
+
+    if (filtered.isEmpty && headers.isEmpty) {
+      return Center(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.02),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  LucideIcons.search_code, 
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                AppLocalizations.of(context)!.nothingFound,
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                AppLocalizations.of(context)!.tryChangingSearchQuery,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await ref.read(packageServiceProvider.notifier).checkActualInstallation();
+      },
+      color: theme.colorScheme.primary,
+      backgroundColor: theme.colorScheme.surface,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        itemCount: filtered.length + headers.length,
+        itemBuilder: (context, index) {
+          if (index < headers.length) {
+            return Column(
+              children: [
+                headers[index],
+                const SizedBox(height: 16),
+              ],
+            );
+          }
+          final pkg = filtered[index - headers.length];
+          return _buildPackageCard(context, ref, pkg);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: Stack(
+        children: [
+          // Background decorative gradients for rich premium look
+          Positioned(
+            top: -150,
+            right: -100,
+            child: Container(
+              width: 350,
+              height: 350,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                    blurRadius: 100,
+                    spreadRadius: 50,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -100,
+            left: -150,
+            child: Container(
+              width: 400,
+              height: 400,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: theme.colorScheme.secondary.withValues(alpha: 0.06),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.secondary.withValues(alpha: 0.04),
+                    blurRadius: 120,
+                    spreadRadius: 60,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                // App Bar / Title Row
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.03),
+                          child: IconButton(
+                            icon: Icon(LucideIcons.arrow_left, color: theme.colorScheme.onSurface, size: 20),
+                            tooltip: AppLocalizations.of(context)!.back,
+                            onPressed: () => context.go('/'),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            AppLocalizations.of(context)!.extensionsAndTools,
+                            style: GoogleFonts.outfit(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              color: theme.colorScheme.onSurface,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.03),
+                          child: IconButton(
+                            icon: Icon(LucideIcons.refresh_cw, color: theme.colorScheme.primary, size: 18),
+                            tooltip: 'Проверить обновления пакетов',
+                            onPressed: () async {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  content: Text(
+                                    'Проверка наличия обновлений для пакетов и CLI-агентов...',
+                                    style: GoogleFonts.inter(color: theme.colorScheme.onSurface),
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                              await ref.read(packageServiceProvider.notifier).checkActualInstallation();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    content: Text(
+                                      'Список пакетов проверен и обновлен.',
+                                      style: GoogleFonts.inter(color: Colors.greenAccent),
+                                    ),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Search Bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.02),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.06)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.search, size: 18, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            onChanged: (v) {
+                              setState(() => _searchQuery = v);
+                              if (_tabController.index != 6) {
+                                // Filtering local is handled in UI builder via _searchQuery
+                              }
+                            },
+                            onSubmitted: (v) {
+                              if (_tabController.index == 6) {
+                                ref.read(pubPackageServiceProvider.notifier).search(v);
+                              }
+                            },
+                            style: GoogleFonts.inter(color: theme.colorScheme.onSurface, fontSize: 14),
+                            decoration: InputDecoration(
+                              hintText: _tabController.index == 6
+                                  ? AppLocalizations.of(context)!.searchPubdevHint
+                                  : AppLocalizations.of(context)!.searchExtensionsHint,
+                              hintStyle: GoogleFonts.inter(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Custom sliding premium TabBar
+                TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  dividerColor: Colors.transparent,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicator: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+                    ),
+                  ),
+                  labelColor: theme.colorScheme.onPrimary,
+                  unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+                  labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+                  unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 13),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  tabs: [
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabAll))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabInstalled))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabLanguagesAndAi))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabTools))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabBuild))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabSdkPlatforms))),
+                    Tab(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text(AppLocalizations.of(context)!.tabPubLibraries))),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // TabBarView content
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    physics: const BouncingScrollPhysics(),
+                    children: [
+                      _buildPackageList(context, ref, 'all'),
+                      _buildPackageList(context, ref, 'installed'),
+                      _buildPackageList(context, ref, 'languages_ai'),
+                      _buildPackageList(context, ref, 'tools'),
+                      _buildPackageList(context, ref, 'build_system'),
+                      _buildPackageList(context, ref, 'sdk_platforms'),
+                      _buildPubMarketplaceTab(context, ref),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEnvironmentHeroCard(BuildContext context, WidgetRef ref) {
+    return FutureBuilder<Map<String, String>>(
+      future: _envInfoFuture,
+      builder: (context, snapshot) {
+        final env = snapshot.data;
+        final os = env?['os'] ?? 'Проверка среды...';
+        final glibc = env?['glibc'] ?? '...';
+        final flutter = env?['flutter'] ?? '...';
+        final needsUpgrade = env?['needsUpgrade'] == 'true';
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: needsUpgrade
+                  ? const [Color(0xFF1E293B), Color(0xFF1E1B4B)]
+                  : const [Color(0xFF0F2922), Color(0xFF101C38)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: (needsUpgrade ? Colors.amberAccent : Colors.greenAccent).withValues(alpha: 0.35),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    needsUpgrade ? LucideIcons.sparkles : LucideIcons.shield_check,
+                    color: needsUpgrade ? Colors.amberAccent : Colors.greenAccent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      needsUpgrade
+                          ? 'Доступен переход на Ubuntu 24.04 + Flutter 3.50'
+                          : 'Среда Linux актуальна (Ubuntu 24.04 / GLIBC $glibc)',
+                      style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'ОС: $os · GLIBC: $glibc · Flutter: $flutter',
+                style: GoogleFonts.jetBrainsMono(fontSize: 11.5, color: Colors.white70),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'В базовый образ уже включены: Git, Node.js, Python 3, Clang/CMake, JDK 17 и Flutter.',
+                style: GoogleFonts.inter(fontSize: 11.5, color: Colors.white60),
+              ),
+              if (needsUpgrade) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => _showMigrationDialog(context, ref),
+                    icon: const Icon(LucideIcons.download, size: 16),
+                    label: const Text('Обновить среду до Ubuntu 24.04 + Flutter 3.50'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.amberAccent,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showMigrationDialog(BuildContext context, WidgetRef ref) async {
+    bool started = false;
+    String? errorMsg;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final runtime = ref.watch(runtimeServiceProvider);
+          return AlertDialog(
+            title: Text(
+              started ? 'Обновление среды Linux' : 'Переход на Ubuntu 24.04 + Flutter 3.50',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!started) ...[
+                  Text(
+                    'Что изменится в окружении:',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text('• Ubuntu 20.04 → Ubuntu 24.04 LTS', style: TextStyle(fontSize: 12.5)),
+                  const Text('• GLIBC 2.31 → GLIBC 2.39 (нужно для Dart 3.14)', style: TextStyle(fontSize: 12.5)),
+                  const Text('• Flutter 3.47.8 → Flutter 3.50.0', style: TextStyle(fontSize: 12.5)),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Что сохранится автоматически:',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.greenAccent),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text('• Все проекты (/root/projects), .ssh, .gitconfig, .gemini', style: TextStyle(fontSize: 12.5)),
+                  const Text('• Настройки IDE и открытые рабочие папки', style: TextStyle(fontSize: 12.5)),
+                ] else ...[
+                  LinearProgressIndicator(
+                    value: runtime.progress > 0 ? runtime.progress : null,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    runtime.status,
+                    style: GoogleFonts.jetBrainsMono(fontSize: 12),
+                  ),
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 8),
+                    Text(errorMsg!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                  ],
+                ],
+              ],
+            ),
+            actions: [
+              if (!started || errorMsg != null)
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Закрыть'),
+                ),
+              if (!started)
+                FilledButton(
+                  onPressed: () async {
+                    setDialogState(() {
+                      started = true;
+                      errorMsg = null;
+                    });
+                    try {
+                      await ref.read(runtimeServiceProvider).migrateToUbuntu2404();
+                      await ref.read(packageServiceProvider.notifier).checkActualInstallation();
+                      if (mounted) {
+                        setState(() {
+                          _envInfoFuture = ref.read(runtimeServiceProvider).inspectEnvironment();
+                        });
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    } catch (e) {
+                      setDialogState(() => errorMsg = '$e');
+                    }
+                  },
+                  child: const Text('Скачать и обновить'),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatKb(int kb) {
+    if (kb >= 1024 * 1024) {
+      return '${(kb / (1024 * 1024)).toStringAsFixed(2)} ГБ';
+    }
+    if (kb >= 1024) {
+      return '${(kb / 1024).toStringAsFixed(1)} МБ';
+    }
+    return '$kb КБ';
+  }
+
+  Widget _buildSystemCleanerCard(BuildContext context, WidgetRef ref) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.cyanAccent.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.cyanAccent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(LucideIcons.sparkles, color: Colors.cyanAccent, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Очистка системы от мусора',
+                  style: GoogleFonts.outfit(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Кэши Gradle, Dart, npm, APT и временные файлы',
+                  style: GoogleFonts.inter(fontSize: 11.5, color: Colors.white60),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: () => _showSystemCleanerDialog(context, ref),
+            icon: const Icon(LucideIcons.trash_2, size: 15),
+            label: const Text('Очистить'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.cyanAccent.withValues(alpha: 0.18),
+              foregroundColor: Colors.cyanAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showSystemCleanerDialog(BuildContext context, WidgetRef ref) async {
+    final runtime = ref.read(runtimeServiceProvider);
+    final activeHostPath = ref.read(workspaceProvider).currentPath;
+    String? activeGuestPath;
+    if (activeHostPath != null && activeHostPath.isNotEmpty) {
+      activeGuestPath = PathMapper.mapToGuest(activeHostPath, runtime.appDirectory);
+    }
+
+    List<CleanupCategory>? categories;
+    final Set<String> selectedIds = {};
+    bool scanStarted = false;
+    bool isCleaning = false;
+    String? errorMsg;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          if (!scanStarted) {
+            scanStarted = true;
+            runtime.scanSystemJunk(activeProjectGuestPath: activeGuestPath).then((res) {
+              if (!ctx.mounted) return;
+              setDialogState(() {
+                categories = res;
+                for (final c in res) {
+                  if (c.defaultSelected && c.sizeKb > 0) {
+                    selectedIds.add(c.id);
+                  }
+                }
+              });
+            }).catchError((e) {
+              if (!ctx.mounted) return;
+              setDialogState(() => errorMsg = '$e');
+            });
+          }
+
+          final list = categories ?? const <CleanupCategory>[];
+          final totalSelectedKb = list
+              .where((c) => selectedIds.contains(c.id))
+              .fold<int>(0, (sum, c) => sum + c.sizeKb);
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.trash_2, size: 20, color: Colors.cyanAccent),
+                const SizedBox(width: 8),
+                Text(
+                  'Очистка системы',
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 17),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: categories == null && errorMsg == null
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 28),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(strokeWidth: 2.5),
+                          SizedBox(height: 14),
+                          Text('Сканирование кэшей и временных файлов...', style: TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                    )
+                  : errorMsg != null
+                      ? Text('Ошибка сканирования: $errorMsg', style: const TextStyle(color: Colors.redAccent, fontSize: 12.5))
+                      : SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (final cat in list)
+                                CheckboxListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  value: selectedIds.contains(cat.id),
+                                  enabled: !isCleaning && cat.sizeKb > 0,
+                                  onChanged: (val) {
+                                    setDialogState(() {
+                                      if (val == true) {
+                                        selectedIds.add(cat.id);
+                                      } else {
+                                        selectedIds.remove(cat.id);
+                                      }
+                                    });
+                                  },
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          cat.title,
+                                          style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                      Text(
+                                        _formatKb(cat.sizeKb),
+                                        style: GoogleFonts.jetBrainsMono(
+                                          fontSize: 11.5,
+                                          color: cat.sizeKb > 0 ? Colors.cyanAccent : Colors.white38,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  subtitle: Text(
+                                    cat.subtitle,
+                                    style: GoogleFonts.inter(fontSize: 11, color: Colors.white54),
+                                  ),
+                                ),
+                              if (isCleaning) ...[
+                                const SizedBox(height: 10),
+                                const LinearProgressIndicator(),
+                              ],
+                            ],
+                          ),
+                        ),
+            ),
+            actions: [
+              if (!isCleaning)
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Закрыть'),
+                ),
+              if (categories != null && !isCleaning)
+                FilledButton.icon(
+                  onPressed: totalSelectedKb <= 0
+                      ? null
+                      : () async {
+                          setDialogState(() => isCleaning = true);
+                          try {
+                            final chosen = list.where((c) => selectedIds.contains(c.id)).toList();
+                            final freedKb = await runtime.cleanSystemJunk(chosen);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Освобождено ${_formatKb(freedKb)}'),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            setDialogState(() {
+                              isCleaning = false;
+                              errorMsg = '$e';
+                            });
+                          }
+                        },
+                  icon: const Icon(LucideIcons.trash_2, size: 15),
+                  label: Text(
+                    totalSelectedKb > 0
+                        ? 'Удалить (${_formatKb(totalSelectedKb)})'
+                        : 'Нечего удалять',
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCliAgentsHeroCard(BuildContext context, WidgetRef ref) {
+    final allPackages = ref.watch(packageServiceProvider);
+    final cliInstaller = ref.watch(cliInstallerProvider);
+
+    final agyPkg = allPackages.where((p) => p.id == 'antigravity-cli').firstOrNull ??
+        defaultPackages.firstWhere((p) => p.id == 'antigravity-cli');
+    final claudePkg = allPackages.where((p) => p.id == 'claude-code').firstOrNull ??
+        defaultPackages.firstWhere((p) => p.id == 'claude-code');
+    final dshPkg = allPackages.where((p) => p.id == 'deepseek-harness').firstOrNull ??
+        defaultPackages.firstWhere((p) => p.id == 'deepseek-harness');
+
+    final agents = [
+      (pkg: agyPkg, kind: AgentKind.antigravity),
+      (pkg: claudePkg, kind: AgentKind.claudeCode),
+      (pkg: dshPkg, kind: AgentKind.deepseekHarness),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1E1035), Color(0xFF101C38)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.purpleAccent.withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.purpleAccent.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.4)),
+                ),
+                child: const Icon(LucideIcons.bot, color: Colors.purpleAccent, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'CLI-Агенты разработки',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.cyanAccent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.4)),
+                          ),
+                          child: Text(
+                            'Mobile-Harness',
+                            style: GoogleFonts.jetBrainsMono(
+                              fontSize: 9,
+                              color: Colors.cyanAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Автономные терминальные агенты Antigravity CLI, Claude Code и DeepSeek Harness',
+                      style: GoogleFonts.inter(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              InkWell(
+                onTap: cliInstaller.isCheckingUpdates
+                    ? null
+                    : () async {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Проверка официальных обновлений для CLI агентов...'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                        await ref.read(cliInstallerProvider.notifier).checkCliUpdates();
+                      },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (cliInstaller.isCheckingUpdates)
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.purpleAccent),
+                        )
+                      else
+                        const Icon(LucideIcons.refresh_cw, size: 12, color: Colors.purpleAccent),
+                      const SizedBox(width: 6),
+                      Text(
+                        cliInstaller.isCheckingUpdates ? 'Проверка...' : 'Обновления',
+                        style: GoogleFonts.inter(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...agents.map((item) {
+            final agent = item.pkg;
+            final kind = item.kind;
+            final installedVersion = cliInstaller.installedVersions[kind];
+            final isInstalled = agent.isInstalled || (installedVersion != null && installedVersion.isNotEmpty);
+            final updateInfo = cliInstaller.availableUpdates[kind];
+            final hasUpdate = updateInfo?.hasUpdate ?? false;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: hasUpdate
+                      ? Colors.amberAccent.withValues(alpha: 0.4)
+                      : Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    agent.icon,
+                    size: 18,
+                    color: agent.id == 'antigravity-cli'
+                        ? Colors.purpleAccent
+                        : agent.id == 'claude-code'
+                            ? Colors.amberAccent
+                            : Colors.cyanAccent,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              agent.name,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                            if (installedVersion != null && installedVersion.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'v$installedVersion',
+                                  style: GoogleFonts.jetBrainsMono(
+                                    fontSize: 9.5,
+                                    color: Colors.white70,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          hasUpdate
+                              ? 'Доступна новая версия v${updateInfo!.latestVersion}! Нажмите для обновления'
+                              : agent.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: hasUpdate ? Colors.amberAccent : Colors.white60,
+                            fontWeight: hasUpdate ? FontWeight.w500 : FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  if (isInstalled)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasUpdate)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.amberAccent.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.sparkles, size: 11, color: Colors.amberAccent),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Обновить',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.amberAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.greenAccent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.check, size: 12, color: Colors.greenAccent),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Актуален',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          icon: Icon(
+                            hasUpdate ? LucideIcons.arrow_up : LucideIcons.refresh_cw,
+                            size: 15,
+                            color: hasUpdate ? Colors.amberAccent : Colors.cyanAccent,
+                          ),
+                          tooltip: hasUpdate ? 'Обновить до v${updateInfo!.latestVersion}' : 'Обновить или переустановить',
+                          onPressed: () => PackageInstallDialog.show(context, agent, isUpdate: true),
+                        ),
+                      ],
+                    )
+                  else
+                    ElevatedButton(
+                      onPressed: () => PackageInstallDialog.show(context, agent),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purpleAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      child: Text(
+                        'Установить',
+                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSDKHeroCard(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final allPackages = ref.watch(packageServiceProvider);
+    // Safe lookup for the SDK package
+    OptionalPackage? sdkPkg;
+    try {
+      sdkPkg = allPackages.firstWhere((p) => p.id == 'android-sdk');
+    } catch (_) {
+      try {
+        sdkPkg = defaultPackages.firstWhere((p) => p.id == 'android-sdk');
+      } catch (_) {
+        sdkPkg = null;
+      }
+    }
+    
+    if (sdkPkg == null || sdkPkg.isInstalled) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: theme.colorScheme.onPrimary.withValues(alpha: 0.15)),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withValues(alpha: 0.25),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onPrimary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(LucideIcons.settings_2, color: theme.colorScheme.onPrimary, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppLocalizations.of(context)!.readyToBuildApk,
+                      style: GoogleFonts.outfit(
+                        color: theme.colorScheme.onPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 19,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AppLocalizations.of(context)!.installAndroidSdkJava,
+                      style: GoogleFonts.inter(
+                        color: theme.colorScheme.onPrimary.withValues(alpha: 0.7),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            AppLocalizations.of(context)!.sdkSetupDescription,
+            style: GoogleFonts.inter(
+              color: theme.colorScheme.onPrimary.withValues(alpha: 0.85),
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                ref.read(packageServiceProvider.notifier).installPackage(sdkPkg!);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    content: Text(
+                      AppLocalizations.of(context)!.initializingDevEnvironment,
+                      style: GoogleFonts.inter(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w500),
+                    ),
+                    action: SnackBarAction(
+                      label: AppLocalizations.of(context)!.viewAction,
+                      textColor: theme.colorScheme.primary,
+                      onPressed: () {
+                        if (context.mounted) {
+                          context.push('/terminal');
+                        }
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.onPrimary,
+                foregroundColor: theme.colorScheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: Text(
+                AppLocalizations.of(context)!.startSdkSetup,
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVulkanHeroCard(BuildContext context, WidgetRef ref) {
+    final allPackages = ref.watch(packageServiceProvider);
+    OptionalPackage? vulkanPkg;
+    try {
+      vulkanPkg = allPackages.firstWhere((p) => p.id == 'vulkan-graphics');
+    } catch (_) {
+      try {
+        vulkanPkg = defaultPackages.firstWhere((p) => p.id == 'vulkan-graphics');
+      } catch (_) {
+        vulkanPkg = null;
+      }
+    }
+
+    if (vulkanPkg == null) return const SizedBox.shrink();
+
+    const cardGradient = LinearGradient(
+      colors: [Color(0xFF0B192C), Color(0xFF1E3E62), Color(0xFF000000)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: cardGradient,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.cyanAccent.withValues(alpha: 0.12),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(LucideIcons.zap, color: Colors.cyanAccent, size: 26),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Vulkan 3D & Mesa Turnip',
+                          style: GoogleFonts.inter(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.cyanAccent.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'Vulkan 1.4',
+                            style: GoogleFonts.firaCode(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.cyanAccent,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Аппаратное GPU-ускорение графики, драйверы Turnip Adreno и Zink OpenGL',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.white.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Обеспечивает прямое аппаратное ускорение GPU планшета для PRoot Linux, поддержку Vulkan 1.4 в Box64 и высокую скорость 3D графики.',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              height: 1.4,
+              color: Colors.white.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.cyanAccent,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(LucideIcons.download, size: 16),
+              label: Text(
+                'Установить Vulkan 3D Stack',
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              onPressed: () {
+                PackageInstallDialog.show(context, vulkanPkg!);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBuildFixHeroCard(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final allPackages = ref.watch(packageServiceProvider);
+    OptionalPackage? fixPkg;
+    try {
+      fixPkg = allPackages.firstWhere((p) => p.id == 'build-fix');
+    } catch (_) {
+      try {
+        fixPkg = defaultPackages.firstWhere((p) => p.id == 'build-fix');
+      } catch (_) {
+        fixPkg = null;
+      }
+    }
+
+    if (fixPkg == null) return const SizedBox.shrink();
+
+    // Use tertiary or error color for the warning/fix card to look distinct
+    final cardColor = theme.colorScheme.tertiaryContainer;
+    final onCardColor = theme.colorScheme.onTertiaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: onCardColor.withValues(alpha: 0.15)),
+        boxShadow: [
+          BoxShadow(
+            color: cardColor.withValues(alpha: 0.25),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: onCardColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(LucideIcons.wrench, color: onCardColor, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppLocalizations.of(context)!.buildIssues,
+                      style: GoogleFonts.outfit(
+                        color: onCardColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 19,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AppLocalizations.of(context)!.restoreAndroidGradleEnv,
+                      style: GoogleFonts.inter(
+                        color: onCardColor.withValues(alpha: 0.7),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            AppLocalizations.of(context)!.wrenchFixDescription,
+            style: GoogleFonts.inter(
+              color: onCardColor.withValues(alpha: 0.85),
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                ref.read(packageServiceProvider.notifier).installPackage(fixPkg!);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    content: Text(
+                      AppLocalizations.of(context)!.runningWrenchFix,
+                      style: GoogleFonts.inter(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w500),
+                    ),
+                    action: SnackBarAction(
+                      label: AppLocalizations.of(context)!.viewAction,
+                      textColor: theme.colorScheme.primary,
+                      onPressed: () {
+                        if (context.mounted) {
+                          context.push('/terminal');
+                        }
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: onCardColor,
+                foregroundColor: cardColor,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: Text(
+                AppLocalizations.of(context)!.startWrenchFix,
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReleaseEngineHeroCard(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final allPackages = ref.watch(packageServiceProvider);
+    OptionalPackage? enginePkg;
+    try {
+      enginePkg = allPackages.firstWhere((p) => p.id == 'flutter-release-engine');
+    } catch (_) {
+      try {
+        enginePkg = defaultPackages.firstWhere((p) => p.id == 'flutter-release-engine');
+      } catch (_) {
+        enginePkg = null;
+      }
+    }
+
+    if (enginePkg == null || enginePkg.isInstalled) return const SizedBox.shrink();
+
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    const cardColor = Color(0xFF1E1B4B); // Deep indigo
+    const accentColor = Color(0xFF818CF8); // Indigo accent
+    const onCardColor = Colors.white;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.2),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(LucideIcons.rocket, color: accentColor, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isRu ? 'Сборка Release APK (Flutter Engine)' : 'Flutter Release Build Engine',
+                      style: GoogleFonts.outfit(
+                        color: onCardColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 19,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isRu ? 'QEMU x86_64 + x64 GLIBC для gen_snapshot' : 'QEMU x86_64 + x64 GLIBC runtime for gen_snapshot',
+                      style: GoogleFonts.inter(
+                        color: accentColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            isRu
+                ? 'Для компиляции Release APK на ARM64 Android устройствах необходим эмулятор QEMU x86_64 и glibc библиотеки для запуска официального компилятора gen_snapshot. Устраняет ошибку "Cannot open file app.so (No such file or directory)".'
+                : 'Enables Flutter Release APK builds on ARM64 Android devices by running Flutter\'s official gen_snapshot via QEMU x86_64 emulator and x64 GLIBC runtime. Prevents app.so missing errors.',
+            style: GoogleFonts.inter(
+              color: onCardColor.withValues(alpha: 0.85),
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                ref.read(packageServiceProvider.notifier).installPackage(enginePkg!);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    content: Text(
+                      isRu ? 'Настройка Flutter Release Build Engine...' : 'Configuring Flutter Release Build Engine...',
+                      style: GoogleFonts.inter(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w500),
+                    ),
+                    action: SnackBarAction(
+                      label: AppLocalizations.of(context)!.viewAction,
+                      textColor: theme.colorScheme.primary,
+                      onPressed: () {
+                        if (context.mounted) {
+                          context.push('/terminal');
+                        }
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accentColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: Text(
+                isRu ? 'Установить движок Release APK (1-Click)' : 'Install Release APK Engine (1-Click)',
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPackageCard(BuildContext context, WidgetRef ref, OptionalPackage pkg) {
+    final theme = Theme.of(context);
+    final Color accentColor = pkg.isInstalled ? const Color(0xFF10B981) : theme.colorScheme.primary;
+    final description = PackageDetailsDialog.getPackageDescription(pkg);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isCompact = screenWidth < 500;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111520),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: pkg.isInstalled
+              ? const Color(0xFF10B981).withValues(alpha: 0.3)
+              : Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => PackageDetailsDialog.show(context, pkg),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top Row: Icon + Name & Version + Category tag
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              accentColor.withValues(alpha: 0.22),
+                              accentColor.withValues(alpha: 0.06),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: accentColor.withValues(alpha: 0.35)),
+                        ),
+                        child: Icon(pkg.icon, color: accentColor, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              pkg.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.06),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 0.6),
+                                  ),
+                                  child: Text(
+                                    pkg.category,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                                if (pkg.version != null && pkg.version!.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.cyanAccent.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3), width: 0.6),
+                                    ),
+                                    child: Text(
+                                      pkg.version!,
+                                      style: GoogleFonts.jetBrainsMono(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.cyanAccent,
+                                      ),
+                                    ),
+                                  ),
+                                if (pkg.isPreinstalledInImage) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.greenAccent.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.35), width: 0.6),
+                                    ),
+                                    child: Text(
+                                      'В образе',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!isCompact) ...[
+                        const SizedBox(width: 12),
+                        _buildInstallButton(context, ref, pkg),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // Description (High Contrast, Readable Russian Text)
+                  Text(
+                    description,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      color: const Color(0xFFCBD5E1),
+                      fontSize: 12.5,
+                      height: 1.42,
+                    ),
+                  ),
+                  if (isCompact) ...[
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: Colors.white10),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => PackageDetailsDialog.show(context, pkg),
+                          icon: const Icon(LucideIcons.info, size: 14, color: Color(0xFF94A3B8)),
+                          label: Text(
+                            'Подробнее',
+                            style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF94A3B8)),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        _buildInstallButton(context, ref, pkg),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInstallButton(BuildContext context, WidgetRef ref, OptionalPackage pkg) {
+    final theme = Theme.of(context);
+    if (pkg.isInstalled) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.greenAccent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.check, size: 12, color: Colors.greenAccent),
+                const SizedBox(width: 4),
+                Text(
+                  'Установлен',
+                  style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(LucideIcons.refresh_cw, color: theme.colorScheme.primary, size: 15),
+            tooltip: 'Обновить или переустановить',
+            onPressed: () => PackageInstallDialog.show(context, pkg, isUpdate: true),
+          ),
+        ],
+      );
+    }
+
+    if (pkg.id == 'build-clean') {
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+        ),
+        child: ElevatedButton.icon(
+          icon: const Icon(LucideIcons.refresh_ccw, size: 13),
+          onPressed: () => PackageInstallDialog.show(context, pkg),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            foregroundColor: theme.colorScheme.onSurface,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          label: Text(
+            'Очистить',
+            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        gradient: LinearGradient(
+          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+        ),
+      ),
+      child: ElevatedButton(
+        onPressed: () => PackageInstallDialog.show(context, pkg),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: theme.colorScheme.onPrimary,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        child: Text(
+          AppLocalizations.of(context)!.installAction,
+          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPubMarketplaceTab(BuildContext context, WidgetRef ref) {
+    final packagesAsync = ref.watch(pubPackageServiceProvider);
+    final theme = Theme.of(context);
+
+    return packagesAsync.when(
+      data: (packages) {
+        if (packages.isEmpty) {
+          return Center(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(LucideIcons.package_search, size: 64, color: theme.colorScheme.onSurface.withValues(alpha: 0.1)),
+                  const SizedBox(height: 16),
+                  Text(
+                    AppLocalizations.of(context)!.searchPubdevTitle,
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    AppLocalizations.of(context)!.searchPubdevDescription,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return ListView.builder(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          itemCount: packages.length,
+          itemBuilder: (context, index) {
+            final pkg = packages[index];
+            return _buildPubPackageCard(context, ref, pkg);
+          },
+        );
+      },
+      loading: () => Center(child: CircularProgressIndicator(color: theme.colorScheme.primary)),
+      error: (err, _) => Center(
+        child: Text(
+          AppLocalizations.of(context)!.loadError(err.toString()),
+          style: GoogleFonts.inter(color: theme.colorScheme.error, fontSize: 13),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPubPackageCard(BuildContext context, WidgetRef ref, PubPackage pkg) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.05)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondary.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: theme.colorScheme.secondary.withValues(alpha: 0.15)),
+                  ),
+                  child: Icon(LucideIcons.package, color: theme.colorScheme.secondary, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        pkg.name,
+                        style: GoogleFonts.inter(
+                          color: theme.colorScheme.onSurface,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'v${pkg.version}',
+                        style: GoogleFonts.inter(
+                          color: theme.colorScheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _buildPubInstallButton(context, ref, pkg),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              pkg.description,
+              style: GoogleFonts.inter(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                _buildMetric(LucideIcons.thumbs_up, pkg.likes.toString()),
+                const SizedBox(width: 16),
+                _buildMetric(LucideIcons.zap, pkg.pubPoints.toString()),
+                const SizedBox(width: 16),
+                _buildMetric(LucideIcons.trending_up, '${(pkg.popularity * 100).toInt()}%'),
+                const Spacer(),
+                Wrap(
+                  spacing: 4,
+                  children: pkg.platforms.take(3).map((p) => _buildPlatformTag(p)).toList(),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPubInstallButton(BuildContext context, WidgetRef ref, PubPackage pkg) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withValues(alpha: 0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ElevatedButton(
+        onPressed: () => _installPubPackage(pkg),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: theme.colorScheme.onPrimary,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          minimumSize: const Size(80, 36),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: Text(
+          AppLocalizations.of(context)!.addAction,
+          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  void _installPubPackage(PubPackage pkg) {
+    final theme = Theme.of(context);
+    final workspace = ref.read(workspaceProvider);
+    if (workspace.currentPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.openProjectToInstallLibraries),
+          backgroundColor: theme.colorScheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final hostPath = workspace.currentPath!;
+    final runtime = ref.read(runtimeServiceProvider);
+    final guestPath = PathMapper.mapToGuest(hostPath, runtime.appDirectory);
+
+    ref.read(terminalTabsProvider.notifier).sendCommand(
+      'cd "$guestPath" && flutter pub add ${pkg.name}',
+      createNewTab: true,
+    );
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context)!.installingLibrary(pkg.name)),
+        backgroundColor: theme.colorScheme.primary,
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: AppLocalizations.of(context)!.viewAction,
+          textColor: theme.colorScheme.onPrimary,
+          onPressed: () {
+            if (context.mounted) {
+              context.push('/terminal');
+            }
+          },
+        ),
+      ),
+    );
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) context.push('/terminal');
+    });
+  }
+
+  Widget _buildMetric(IconData icon, String value) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+        const SizedBox(width: 4),
+        Text(value, style: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontSize: 12)),
+      ],
+    );
+  }
+
+  Widget _buildPlatformTag(String platform) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        platform.toUpperCase(),
+        style: TextStyle(color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7), fontSize: 8, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}

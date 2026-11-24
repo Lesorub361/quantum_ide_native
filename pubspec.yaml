@@ -1,0 +1,130 @@
+name: quantum_ide
+description: "QuantumIDE - A next-generation AI-powered mobile IDE for web development built with Flutter."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.8.1
+  re_editor: ^0.10.0
+  re_highlight: ^0.0.3
+  path_provider: ^2.1.5
+  file_picker: ^13.3.3
+  permission_handler: ^11.4.0
+  flutter_lucide: 1.9.0
+  flex_color_scheme: ^8.4.0
+  flutter_inappwebview: ^6.1.5
+  conduit_vt:
+    path: packages/conduit_vt
+  flutter_code_crafter:
+    path: packages/flutter_code_crafter
+  http: ^1.4.0
+  flutter_pty: ^0.4.2
+  google_fonts: ^6.3.3
+  shared_preferences: ^2.5.5
+  intl: ^0.20.2
+  path: ^1.9.1
+  uuid: ^4.5.1
+  dio: ^5.8.0+1
+  archive: ^4.5.2
+  url_launcher: ^6.3.2
+  open_filex: ^4.5.0
+  diff_match_patch: ^0.4.1
+  desktop_drop: ^0.7.1
+  flutter_markdown_plus: ^1.0.12
+  photo_view: ^0.15.0
+  fl_chart: ^0.70.2
+  device_info_plus: ^13.3.0
+  package_info_plus: ^10.2.2
+  # Mobile UX & IDE Tools
+  flutter_secure_storage: ^11.2.0
+  share_plus: ^13.3.1
+  dartssh2: ^2.22.1
+  wakelock_plus: ">=1.6.1 <1.8.1"
+  
+  crypto: ^3.0.6
+  sqflite: ^2.4.4+2
+  sqflite_common_ffi: ^2.4.4
+  qr_flutter: ^4.1.0
+  quick_actions: ^1.1.1
+  flutter_colorpicker: ^1.1.0
+  talker_flutter: ^5.2.0
+  device_frame: ^1.4.0
+  audioplayers: ^6.8.1
+
+  # High-performance & Modern Packages
+  gpt_markdown: ^1.4.0
+  connectivity_plus: ^6.1.1
+  dio_smart_retry: ^6.0.0
+  battery_plus: ^7.1.2
+
+  # Code Tools & Diffing
+  pretty_diff_text: ^2.1.0
+
+  # Next-gen UI
+  flutter_animate: ^4.5.2
+  multi_split_view: ^3.6.2
+
+  # Workspace & AI Utilities
+  watcher: ^1.2.1
+  langchain_tiktoken: ^1.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/
+    - assets/bin/
+    - assets/prompts/
+    - assets/native_env/pkg/
+    - assets/native_env/pkg/lib/
+    - assets/native_env/etc/pkg/
+  fonts:
+    - family: firaCode
+      fonts:
+        - asset: assets/fonts/FiraCode-Medium.ttf
+    - family: cascadia
+      fonts:
+        - asset: assets/fonts/CascadiaCodePL-Regular.ttf
+    - family: hack
+      fonts:
+        - asset: assets/fonts/Hack-Regular.ttf
+    - family: dejaVuSansMono
+      fonts:
+        - asset: assets/fonts/DejaVuSansMono.ttf
+    - family: inconsolata
+      fonts:
+        - asset: assets/fonts/Inconsolata-Regular.ttf
+    - family: jetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+    - family: proggy
+      fonts:
+        - asset: assets/fonts/ProggyVector-Regular.ttf
+    - family: sourceCodePro
+      fonts:
+        - asset: assets/fonts/SourceCodePro-Medium.ttf
+    - family: SymbolsNerdFont
+      fonts:
+        - asset: assets/fonts/SymbolsNerdFontMono-Regular.ttf
+    - family: "Symbols Nerd Font"
+      fonts:
+        - asset: assets/fonts/SymbolsNerdFontMono-Regular.ttf
+    - family: Seti
+      fonts:
+        - asset: assets/fonts/Seti.ttf
+    - family: AtkynsonMonoNerdFontMono
+      fonts:
+        - asset: assets/fonts/AtkynsonMonoNerdFontMono-Regular.otf

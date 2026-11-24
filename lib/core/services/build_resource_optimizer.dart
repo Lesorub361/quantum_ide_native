@@ -1,0 +1,256 @@
+import 'dart:io';
+import 'dart:math' as math;
+
+/// Target architectures and build formats for Android/Flutter builds.
+enum BuildTargetType {
+  arm64, // APK ARM64-v8a (64-bit) — R8 Release
+  arm64D8, // APK ARM64-v8a (64-bit) — Fast D8 (no R8)
+  arm32, // APK ARMeabi-v7a (32-bit) — Legacy 32-bit phones
+  x86_64, // APK x86_64 — PC Android emulators
+  split, // Split APKs per ABI (separate APK files)
+  aab, // Android App Bundle (Google Play Store — with R8)
+  aabD8, // Android App Bundle (Google Play Store — Fast D8 without R8)
+  debug, // Debug APK (ARM64)
+}
+
+/// Performance tuning profile for Gradle and Dart compilation.
+enum BuildPerformanceMode {
+  turbo, // Maximum safe utilization of CPU cores & RAM
+  balanced, // Recommended auto-balance: fast compilation without risking OOM
+  safe, // Minimal resource consumption (low battery/memory)
+}
+
+/// Dynamic system hardware info and optimal resource configuration.
+class SystemHardwareProfile {
+  final int cpuCores;
+  final int totalRamMb;
+  final int availableRamMb;
+
+  const SystemHardwareProfile({
+    required this.cpuCores,
+    required this.totalRamMb,
+    required this.availableRamMb,
+  });
+
+  @override
+  String toString() =>
+      'CPU: $cpuCores cores, RAM: ${availableRamMb}MB avail / ${totalRamMb}MB total';
+}
+
+/// Resource calculation result for a build session.
+class BuildResourceConfig {
+  final int workers;
+  final int jvmHeapMb;
+  final int jvmMetaspaceMb;
+  final int dartHeapMb;
+  final bool parallel;
+
+  const BuildResourceConfig({
+    required this.workers,
+    required this.jvmHeapMb,
+    required this.jvmMetaspaceMb,
+    required this.dartHeapMb,
+    required this.parallel,
+  });
+}
+
+/// Service that detects device hardware resources (CPU cores, RAM)
+/// and provides adaptive auto-tuning for Flutter & Gradle builds.
+class BuildResourceOptimizer {
+  const BuildResourceOptimizer._();
+
+  /// Detects real hardware resources from system files or Dart Platform API.
+  static SystemHardwareProfile detectHardware() {
+    final cores = Platform.numberOfProcessors;
+    int totalRamMb = 4096;
+    int availRamMb = 2048;
+
+    try {
+      final meminfo = File('/proc/meminfo');
+      if (meminfo.existsSync()) {
+        final lines = meminfo.readAsLinesSync();
+        for (final line in lines) {
+          if (line.startsWith('MemTotal:')) {
+            final parts = line.split(RegExp(r'\s+'));
+            if (parts.length >= 2) {
+              final kb = int.tryParse(parts[1]) ?? 0;
+              if (kb > 0) totalRamMb = kb ~/ 1024;
+            }
+          } else if (line.startsWith('MemAvailable:')) {
+            final parts = line.split(RegExp(r'\s+'));
+            if (parts.length >= 2) {
+              final kb = int.tryParse(parts[1]) ?? 0;
+              if (kb > 0) availRamMb = kb ~/ 1024;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Fallback defaults on non-proc systems
+    }
+
+    return SystemHardwareProfile(
+      cpuCores: math.max(1, cores),
+      totalRamMb: totalRamMb,
+      availableRamMb: availRamMb,
+    );
+  }
+
+  /// Calculates optimal Gradle workers, JVM heap, and Dart heap for a given profile.
+  static BuildResourceConfig computeResourceConfig({
+    SystemHardwareProfile? hardware,
+    BuildPerformanceMode mode = BuildPerformanceMode.balanced,
+  }) {
+    final hw = hardware ?? detectHardware();
+    final cores = hw.cpuCores;
+    final ram = hw.availableRamMb;
+
+    int workers = 2;
+    int jvmHeap = 1792;
+    int jvmMeta = 448;
+    int dartHeap = 1024;
+    bool parallel = true;
+
+    switch (mode) {
+      case BuildPerformanceMode.turbo:
+        // Turbo mode: utilize CPU cores when free RAM safely permits it
+        if (ram >= 6000) {
+          jvmHeap = 2560;
+          jvmMeta = 512;
+          dartHeap = 1280;
+          workers = math.min(cores, 4);
+        } else if (ram >= 3500) {
+          jvmHeap = 1792;
+          jvmMeta = 448;
+          dartHeap = 1024;
+          workers = math.min(cores, 3);
+        } else if (ram >= 2500) {
+          jvmHeap = 1408;
+          jvmMeta = 384;
+          dartHeap = 896;
+          workers = math.min(cores, 2);
+        } else {
+          jvmHeap = 1024;
+          jvmMeta = 320;
+          dartHeap = 640;
+          workers = 1;
+          parallel = false;
+        }
+        break;
+
+      case BuildPerformanceMode.balanced:
+        // Balanced: optimal compilation speed without risking Android LMK
+        if (ram >= 6000) {
+          jvmHeap = 1792;
+          jvmMeta = 448;
+          dartHeap = 1024;
+          workers = cores >= 8 ? 3 : math.min(cores, 2);
+        } else if (ram >= 3500) {
+          jvmHeap = 1536;
+          jvmMeta = 384;
+          dartHeap = 896;
+          workers = cores >= 6 ? 2 : 1;
+        } else if (ram >= 2500) {
+          jvmHeap = 1280;
+          jvmMeta = 384;
+          dartHeap = 768;
+          workers = 2;
+          parallel = false;
+        } else if (ram >= 1600) {
+          jvmHeap = 1024;
+          jvmMeta = 320;
+          dartHeap = 640;
+          workers = 1;
+          parallel = false;
+        } else {
+          jvmHeap = 896;
+          jvmMeta = 256;
+          dartHeap = 512;
+          workers = 1;
+          parallel = false;
+        }
+        break;
+
+      case BuildPerformanceMode.safe:
+        // Safe mode: low memory & battery saver
+        jvmHeap = math.min(1024, (ram * 0.35).toInt());
+        jvmHeap = math.max(768, jvmHeap);
+        jvmMeta = 256;
+        dartHeap = 512;
+        workers = 1;
+        parallel = false;
+        break;
+    }
+
+    return BuildResourceConfig(
+      workers: math.max(1, workers),
+      jvmHeapMb: jvmHeap,
+      jvmMetaspaceMb: jvmMeta,
+      dartHeapMb: dartHeap,
+      parallel: parallel,
+    );
+  }
+
+  /// Generates the complete terminal command for building the selected target.
+  static String generateBuildCommand({
+    required BuildTargetType target,
+    BuildPerformanceMode mode = BuildPerformanceMode.balanced,
+    int? customWorkers,
+  }) {
+    final config = computeResourceConfig(mode: mode);
+    final workers = customWorkers ?? config.workers;
+
+    const checkSdk = '([ ! -s .dart_tool/package_config.json ] && flutter pub get || true)';
+
+    final envPrefix =
+        'GRADLE_OPTS="-Xmx${config.jvmHeapMb}m -XX:MaxMetaspaceSize=${config.jvmMetaspaceMb}m -Dorg.gradle.workers.max=$workers -Dorg.gradle.parallel=${config.parallel} -Dorg.gradle.vfs.watch=false -Dkotlin.daemon.jvm.options=-Xmx512m"';
+
+    switch (target) {
+      case BuildTargetType.arm64:
+        return '$checkSdk && $envPrefix flutter build apk --release --no-pub --target-platform android-arm64 --no-tree-shake-icons --android-skip-build-dependency-validation && (cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk 2>/dev/null || cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ./app-release.apk 2>/dev/null || true) && echo "✓ Release APK (ARM64 · R8): ./app-release.apk"';
+
+      case BuildTargetType.arm64D8:
+        return '$checkSdk && QUANTUM_DISABLE_R8=1 $envPrefix flutter build apk --release --no-pub --target-platform android-arm64 --no-tree-shake-icons --android-skip-build-dependency-validation && (cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk 2>/dev/null || cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ./app-release.apk 2>/dev/null || true) && echo "✓ Release APK (ARM64 · D8 без R8): ./app-release.apk"';
+
+      case BuildTargetType.arm32:
+        return '$checkSdk && $envPrefix flutter build apk --release --no-pub --target-platform android-arm --no-tree-shake-icons --android-skip-build-dependency-validation && (cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk ./app-release-armv7.apk 2>/dev/null || cp build/app/outputs/flutter-apk/app-release.apk ./app-release-armv7.apk 2>/dev/null || true) && echo "✓ Release APK (ARMv7 32-бит): ./app-release-armv7.apk"';
+
+      case BuildTargetType.x86_64:
+        return '$checkSdk && $envPrefix flutter build apk --release --no-pub --target-platform android-x64 --no-tree-shake-icons --android-skip-build-dependency-validation && (cp build/app/outputs/flutter-apk/app-x86_64-release.apk ./app-release-x64.apk 2>/dev/null || cp build/app/outputs/flutter-apk/app-release.apk ./app-release-x64.apk 2>/dev/null || true) && echo "✓ Release APK (x86_64): ./app-release-x64.apk"';
+
+      case BuildTargetType.split:
+        return '$checkSdk && $envPrefix flutter build apk --release --no-pub --split-per-abi --no-tree-shake-icons --android-skip-build-dependency-validation && (for apk in build/app/outputs/flutter-apk/*.apk; do cp -f "\$apk" ./ 2>/dev/null; done) && echo "✓ Split APKs (arm64, armv7, x86_64) готовы в корне проекта"';
+
+      case BuildTargetType.aab:
+        return '$checkSdk && $envPrefix flutter build appbundle --release --no-pub --no-tree-shake-icons --android-skip-build-dependency-validation && (cp -f build/app/outputs/bundle/release/app-release.aab ./app-release.aab 2>/dev/null || true) && echo "✓ Google Play Bundle (AAB · R8): ./app-release.aab"';
+
+      case BuildTargetType.aabD8:
+        return '$checkSdk && QUANTUM_DISABLE_R8=1 $envPrefix flutter build appbundle --release --no-pub --no-tree-shake-icons --android-skip-build-dependency-validation && (cp -f build/app/outputs/bundle/release/app-release.aab ./app-release.aab 2>/dev/null || true) && echo "✓ Google Play Bundle (AAB · D8 без R8): ./app-release.aab"';
+
+      case BuildTargetType.debug:
+        return '$checkSdk && $envPrefix flutter build apk --debug --no-pub --target-platform android-arm64 --no-tree-shake-icons --android-skip-build-dependency-validation && (cp build/app/outputs/flutter-apk/app-debug.apk ./app-debug.apk 2>/dev/null || true) && echo "✓ Debug APK (ARM64): ./app-debug.apk"';
+    }
+  }
+
+  /// Short display title for terminal / UI buttons.
+  static String getDisplayCommand(BuildTargetType target) {
+    switch (target) {
+      case BuildTargetType.arm64:
+        return 'flutter build apk --release --target-platform android-arm64 (R8)';
+      case BuildTargetType.arm64D8:
+        return 'flutter build apk --release --target-platform android-arm64 (D8 · без R8)';
+      case BuildTargetType.arm32:
+        return 'flutter build apk --release --target-platform android-arm';
+      case BuildTargetType.x86_64:
+        return 'flutter build apk --release --target-platform android-x64';
+      case BuildTargetType.split:
+        return 'flutter build apk --release --split-per-abi';
+      case BuildTargetType.aab:
+        return 'flutter build appbundle --release (R8)';
+      case BuildTargetType.aabD8:
+        return 'flutter build appbundle --release (D8 · без R8)';
+      case BuildTargetType.debug:
+        return 'flutter build apk --debug';
+    }
+  }
+}

@@ -1,0 +1,131 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../features/home/presentation/pages/home_page.dart';
+import '../../features/home/presentation/pages/bootstrap_page.dart';
+import '../../features/file_explorer/presentation/pages/file_explorer_page.dart';
+import '../../features/editor/presentation/pages/editor_page.dart';
+import '../../features/preview/presentation/pages/preview_page.dart';
+import '../../features/terminal/presentation/pages/terminal_page.dart';
+import '../../features/home/presentation/pages/server_page.dart';
+import '../../features/home/presentation/pages/package_page.dart';
+import '../../features/home/presentation/pages/settings_page.dart';
+import '../../features/preview/presentation/widgets/file_preview_widget.dart';
+import '../../features/rest_client/presentation/pages/rest_client_page.dart';
+import '../../features/github/presentation/pages/github_page.dart';
+import '../../shared/widgets/main_layout.dart';
+import '../../features/git/presentation/pages/git_graph_page.dart';
+import '../../features/home/presentation/pages/database_viewer_page.dart';
+import '../../features/home/presentation/pages/devtools_page.dart';
+import '../../features/home/presentation/pages/sftp_explorer_page.dart';
+import 'package:talker_flutter/talker_flutter.dart';
+import '../services/talker_service.dart';
+import '../services/network_inspector_service.dart';
+
+class UnfocusRouteObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    super.didPop(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
+
+final appRouter = GoRouter(
+  initialLocation: '/bootstrap',
+  observers: [
+    UnfocusRouteObserver(),
+  ],
+  routes: [
+    GoRoute(
+      path: '/bootstrap',
+      builder: (context, state) => const BootstrapPage(),
+    ),
+    ShellRoute(
+      builder: (context, state, child) => MainLayout(child: child),
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const HomePage(),
+        ),
+        GoRoute(
+          path: '/explorer',
+          builder: (context, state) => const FileExplorerPage(),
+        ),
+        GoRoute(
+          path: '/editor',
+          builder: (context, state) => const EditorPage(),
+        ),
+        GoRoute(
+          path: '/preview',
+          builder: (context, state) => const PreviewPage(),
+        ),
+        GoRoute(
+          path: '/terminal',
+          builder: (context, state) => const TerminalPage(),
+        ),
+        GoRoute(
+          path: '/servers',
+          builder: (context, state) => const ServerPage(),
+        ),
+        GoRoute(
+          path: '/packages',
+          builder: (context, state) => const PackagePage(),
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsPage(),
+        ),
+        GoRoute(
+          path: '/preview-file',
+          builder: (context, state) {
+            final filePath = state.uri.queryParameters['path'] ?? '';
+            return FilePreviewWidget(filePath: filePath);
+          },
+        ),
+        GoRoute(
+          path: '/rest-client',
+          builder: (context, state) => const RestClientPage(),
+        ),
+        GoRoute(
+          path: '/github',
+          builder: (context, state) => const GitHubPage(),
+        ),
+        GoRoute(
+          path: '/logs',
+          builder: (context, state) => TalkerScreen(talker: TalkerService.talker),
+        ),
+        GoRoute(
+          path: '/git-graph',
+          builder: (context, state) => const GitGraphPage(),
+        ),
+        GoRoute(
+          path: '/network-inspector',
+          builder: (context, state) => const NetworkInspectorScreen(),
+        ),
+        GoRoute(
+          path: '/database-viewer',
+          builder: (context, state) => const DatabaseViewerPage(),
+        ),
+        GoRoute(
+          path: '/devtools',
+          builder: (context, state) => const DevToolsPage(),
+        ),
+        GoRoute(
+          path: '/sftp-explorer',
+          builder: (context, state) => const SftpExplorerPage(),
+        ),
+      ],
+    ),
+  ],
+);

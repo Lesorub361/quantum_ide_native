@@ -1,0 +1,16 @@
+{
+  "versionCode": 1,
+  "versionName": "1.0.0",
+  "notes": "## 🚀 QuantumIDE Native v1.0.0\n\n### Чистый Native ARM64 Userspace (Leostryx `.so` + `pkg`, без Ubuntu и без PRoot)\n- **Без Ubuntu и без PRoot**: удалены `libproot.so`, `libprootloader.so`, `libtalloc.so`; при первом запуске скачивается только лёгкий ARM64 bootstrap (~44 МБ).\n- **Leostryx `.so` + `pkg`**: вшиты `libtermux-exec.so`, `libquantum_loader.so`, `liblse_compat.so` и пакетный менеджер `pkg`.\n- **Нативный запуск Bionic `bash` через `/system/bin/linker64`**: без ошибки `libdl.so` и полностью совместимо с Android 10–16 (`targetSdk 36`).\n- **Отдельный `applicationId` (`com.example.quantum_ide_native`)**: устанавливается рядом с обычным QuantumIDE без конфликтов.",
+  "artifacts": {
+    "online": {
+      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.0/app-arm64-v8a-release.apk",
+      "sha256": "",
+      "sizeBytes": 0
+    }
+  },
+  "version": "1.0.0",
+  "buildNumber": 1,
+  "tag_name": "v1.0.0",
+  "releaseNotes": "Первый релиз QuantumIDE Native: чистый Native ARM64 Userspace (Leostryx .so + pkg) без Ubuntu и PRoot."
+}

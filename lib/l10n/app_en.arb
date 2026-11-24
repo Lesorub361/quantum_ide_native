@@ -1,0 +1,1930 @@
+{
+  "appTitle": "QuantumIDE",
+  "explorer": "Explorer",
+  "newFile": "New File",
+  "newFolder": "New Folder",
+  "refresh": "Refresh",
+  "rename": "Rename",
+  "delete": "Delete",
+  "cancel": "Cancel",
+  "save": "Save",
+  "create": "Create",
+  "projectNotOpened": "Project not opened",
+  "selectFileToStart": "Select a file in the explorer to start working",
+  "openExplorer": "Open Explorer",
+  "confirmDelete": "Confirm Delete",
+  "areYouSureDelete": "Are you sure you want to delete {name}?",
+  "@areYouSureDelete": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "terminal": "Terminal",
+  "run": "Run",
+  "build": "Build",
+  "aiAgent": "AI Agent",
+  "servers": "Servers",
+  "buildLogs": "Build logs",
+  "appLogs": "App Logs",
+  "copy": "Copy",
+  "stop": "Stop",
+  "hotReload": "Hot Reload",
+  "clear": "Clear",
+  "runProject": "Run Project",
+  "pubGet": "Pub Get",
+  "setupSdk": "Setup SDK",
+  "clean": "Clean",
+  "buildApk": "Build APK",
+  "welcomeMessage": "Welcome to your premium environment.",
+  "typeRunToStart": "Type run to start your project.",
+  "settings": "Settings",
+  "interfaceAndLocalization": "Interface & Localization",
+  "language": "Language",
+  "theme": "Theme",
+  "darkTheme": "Dark Theme",
+  "lightTheme": "Light Theme",
+  "colorPalette": "Color Palette",
+  "customColor": "Custom Color",
+  "accentColor": "Accent Color",
+  "projectIcon": "Project Icon",
+  "defaultAccent": "Default",
+  "codeEditor": "Code Editor",
+  "editorFontSize": "Editor Font Size",
+  "autoCompletion": "Auto-completion",
+  "showCodeHints": "Show code hints",
+  "aiAutoCompletion": "AI Auto-completion",
+  "geminiCodeGeneration": "Gemini code generation",
+  "wordWrap": "Word Wrap",
+  "wordWrapDescription": "Soft wrap lines in editor",
+  "lineNumbers": "Line Numbers",
+  "showLineNumbers": "Show line numbers",
+  "minimap": "Minimap",
+  "showMinimap": "Show editor minimap",
+  "autoSave": "Auto-save",
+  "autoSaveDescription": "Save changes after 2s",
+  "terminalFontSize": "Terminal Font Size",
+  "terminalTheme": "Terminal Theme",
+  "toolsAndAi": "Tools & AI",
+  "aiProviders": "AI Providers",
+  "aiProvidersSubtitle": "Gemini, OpenAI, Ollama etc.",
+  "ubuntuPackages": "Ubuntu Packages",
+  "manageCliTools": "Manage CLI tools",
+  "hosts": "Hosts",
+  "localRemoteHosts": "Local/remote hosts",
+  "system": "System",
+  "showHiddenFiles": "Show Hidden Files",
+  "showHiddenFilesDescription": "Show .* files",
+  "vibration": "Vibration",
+  "hapticFeedback": "Haptic feedback",
+  "aboutApp": "About App",
+  "aboutAppSubtitle": "Quantum IDE v1.0.0",
+  "selectPalette": "Select Palette",
+  "close": "Close",
+  "resetToDefault": "Reset to Default",
+  "aboutDialogContent": "AI-powered mobile IDE built with Flutter.\n© 2026 Quantum IDE",
+  "ubuntuDarkPurple": "Ubuntu Dark Purple",
+  "pureDark": "Pure Dark",
+  "searchProjects": "Search projects...",
+  "open": "Open",
+  "market": "Market",
+  "projectsHeader": "Projects ({count})",
+  "@projectsHeader": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noProjects": "No projects",
+  "nothingFound": "Nothing found",
+  "createFirstProject": "Create first project",
+  "projectActions": "Project Actions",
+  "fixAndroidBuild": "Fix Android Build (AGP + compileSdk)",
+  "patchAndroidBuildDescription": "Patch android-36 / AGP 8.7.3 / compileSdk 35",
+  "buildApkDescription": "flutter build apk --debug",
+  "apkBuildFixed": "✅ Android build files fixed for \"{name}\"",
+  "@apkBuildFixed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "confirmDeleteTitle": "Confirm Delete",
+  "@confirmDeleteTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "confirmDeleteMessage": "Delete only from the list or delete files as well?",
+  "deleteFromListOnly": "From list",
+  "deleteFromDisk": "From disk",
+  "projectSettings": "Project Settings",
+  "createProject": "Create Project",
+  "projectName": "Project Name",
+  "projectType": "PROJECT TYPE",
+  "androidCompileSdkVersion": "ANDROID compileSdk VERSION",
+  "defaultSdkVersion": "Default: 35",
+  "targetPlatforms": "TARGET DEVICES / PLATFORMS",
+  "saveAction": "Save",
+  "code": "Code",
+  "preview": "Preview",
+  "fastCommands": "QUICK COMMANDS",
+  "serverAddress": "Server Address",
+  "copied": "Copied: {value}",
+  "@copied": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "stopServer": "Stop",
+  "command": "COMMAND",
+  "serverStarted": "Server Started",
+  "openAddressInBrowser": "Open this address in Android browser",
+  "copyUrl": "Copy URL",
+  "openProjectToSeeCommands": "Open a project to see run commands",
+  "running": "Running...",
+  "chat": "Chat",
+  "agents": "Agents",
+  "askAiHint": "Ask {provider}...",
+  "@askAiHint": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "selectModel": "Select Model",
+  "clearHistory": "Clear History",
+  "askAboutCode": "Ask about the code",
+  "you": "You",
+  "workingOnFile": "I'm working on the file: {file}. \nHere is its content:\n```\n{code}\n```\n\nMy question: {question}",
+  "@workingOnFile": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      },
+      "question": {
+        "type": "String"
+      }
+    }
+  },
+  "aiAskDialogTitle": "AI Agent Query",
+  "aiAskFolder": "Folder: {name}",
+  "@aiAskFolder": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "aiAskFile": "File: {name}",
+  "@aiAskFile": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "aiAskFolderHint": "Describe the task (e.g. \"create a controller\", \"add a data model\"...)",
+  "aiAskFileHint": "What needs to be done? (e.g. \"add email validation\", \"optimize method\"...)",
+  "decline": "Decline",
+  "apply": "Apply",
+  "showChanges": "Show changes",
+  "changesInFile": "Changes in {name}",
+  "@changesInFile": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "noFilesFound": "No files found",
+  "retry": "Retry",
+  "errorOccurred": "Error: {error}",
+  "@errorOccurred": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "aiProvidersInfo": "Add API keys for different AI providers. Local models (Ollama/LM Studio) do not require a key.",
+  "activeProvider": "Active Provider",
+  "requiresApiKeyLabel": "Requires API Key",
+  "localNoKey": "Local — no key",
+  "activeCaps": "ACTIVE",
+  "apiKeyLabel": "API Key",
+  "keySaved": "API key saved",
+  "urlSaved": "URL saved",
+  "serverUrlLabel": "Server URL",
+  "ollamaPhoneHint": "💡 To connect from a phone, use your computer's IP (e.g. http://192.168.1.10:11434)",
+  "modelLabel": "MODEL",
+  "searching": "Searching...",
+  "findModels": "Find Models",
+  "searchModelHint": "Search by model name...",
+  "customModelHint": "Or enter model name manually...",
+  "modelInstalled": "Model set to {name}",
+  "@modelInstalled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "modelsNotFound": "No models found. Click \"Find Models\".",
+  "available": "Available",
+  "quotaLimit": "Quota limit / high load",
+  "unavailable": "Unavailable",
+  "availableCaps": "AVAILABLE",
+  "activateProvider": "Activate Provider",
+  "providerActivated": "{name} activated",
+  "@providerActivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "send": "Send",
+  "acceptAll": "Accept all",
+  "rejectAll": "Reject all",
+  "projectAnalysis": "Project Analysis",
+  "problemsFound": "Problems found: {count} ({errors} errors, {warnings} warnings)",
+  "@problemsFound": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "errors": {
+        "type": "int"
+      },
+      "warnings": {
+        "type": "int"
+      }
+    }
+  },
+  "fixWithAi": "Fix with AI",
+  "runningCommand": "RUNNING COMMAND",
+  "@runningCommand": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "applyingChange": "Applying change: {path}...",
+  "@applyingChange": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "fileSuccessfullyWritten": "File {path} successfully written.",
+  "@fileSuccessfullyWritten": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "fileSuccessfullyDeleted": "File {path} successfully deleted.",
+  "@fileSuccessfullyDeleted": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "commandExecutedResult": "Command \"{command}\" executed. Result:\n{result}",
+  "@commandExecutedResult": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "commandSentToTerminal": "Command \"{command}\" sent to terminal.",
+  "@commandSentToTerminal": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "unknownActionType": "Unknown action type: {type}",
+  "@unknownActionType": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToApplyAction": "Failed to apply action: {error}",
+  "@failedToApplyAction": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "noErrorsFound": "No errors found",
+  "noErrorsDescription": "Code analyzer checked your project. No issues or warnings found.",
+  "closeProject": "Close Project",
+  "closeProjectConfirm": "Are you sure you want to close this project?",
+  "sortByName": "By Name",
+  "sortBySize": "By Size",
+  "sortByDate": "By Date",
+  "goToDefinition": "Go to Definition",
+  "documentation": "Documentation",
+  "usages": "Usages",
+  "cut": "Cut",
+  "paste": "Paste",
+  "selectAll": "Select All",
+  "line": "Line",
+  "column": "Column",
+  "info": "Info",
+  "ok": "OK",
+  "problems": "Problems",
+  "packages": "Packages",
+  "tools": "Tools",
+  "searchFiles": "Search files...",
+  "imageLoadError": "Error loading image",
+  "unsaved": "Unsaved",
+  "saved": "Saved",
+  "lineCol": "Ln {line}, Col {col}",
+  "@lineCol": {
+    "placeholders": {
+      "line": {
+        "type": "int"
+      },
+      "col": {
+        "type": "int"
+      }
+    }
+  },
+  "noOpenFiles": "No open files in editor",
+  "fileNotFoundOnDisk": "File not found on disk",
+  "parsingError": "Parsing error: {error}",
+  "@parsingError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "outlineEmptyOrUnsupported": "Outline empty or unsupported",
+  "outlineHeader": "Structure: {filename}",
+  "@outlineHeader": {
+    "placeholders": {
+      "filename": {
+        "type": "String"
+      }
+    }
+  },
+  "projectFolderNotFound": "Project folder not found",
+  "rootFiles": "[Files in root]",
+  "scanningError": "Scanning error: {error}",
+  "@scanningError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteFileConfirmTitle": "Delete File",
+  "deleteFileConfirmMessage": "Are you sure you want to permanently delete file:\n\n{name}\nSize: {size}?",
+  "@deleteFileConfirmMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "fileDeletedSuccess": "File deleted successfully",
+  "deleteFileError": "Delete error: {error}",
+  "@deleteFileError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "diskSpaceAnalysis": "Disk space analysis...",
+  "projectFolderEmpty": "Project folder empty",
+  "projectSize": "Project size:",
+  "folderDistribution": "Folder Distribution",
+  "topHeavyFiles": "Top 10 Heavy Files",
+  "noHeavyFiles": "No heavy files",
+  "searchPlaceholder": "Search contents...",
+  "searchCaseSensitive": "Case sensitive",
+  "searchWholeWord": "Whole word",
+  "searchRegex": "Regular expression",
+  "searchInvalidRegex": "Invalid regular expression",
+  "searchNoMatches": "No matches found",
+  "searchMatchesFound": "Found {matches} matches in {files} files",
+  "@searchMatchesFound": {
+    "placeholders": {
+      "matches": {
+        "type": "int"
+      },
+      "files": {
+        "type": "int"
+      }
+    }
+  },
+  "searchError": "Search error: {error}",
+  "@searchError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "searchingInProgress": "Searching...",
+  "searchPrompt": "Enter query to search",
+  "apkSigner": "APK Signer",
+  "createKeystore": "Create Keystore",
+  "stepSelectApk": "Step 1: Select APK to sign",
+  "selectApk": "Select APK",
+  "selectCustomPath": "Specify custom path...",
+  "apkPathHint": "Full path to APK file on device",
+  "stepSelectKeystore": "Step 2: Select Keystore",
+  "selectKeystore": "Select Keystore",
+  "keystorePathHint": "Full path to .jks/.keystore file",
+  "stepSignSettings": "Step 3: Signing settings",
+  "keystorePassword": "Keystore password",
+  "keyAlias": "Key Alias",
+  "keyAliasPassword": "Key Alias password",
+  "outputApkName": "Output APK filename",
+  "signApkButton": "Sign APK",
+  "install": "Install",
+  "refreshProjectFiles": "Refresh project files list",
+  "newKeystoreParams": "New Keystore parameters",
+  "keystoreFilenameHint": "Filename (e.g. release.jks)",
+  "storePasswordHint": "Keystore password (min 6 chars)",
+  "keyAliasHint": "Key alias (e.g. key)",
+  "developerInfoDn": "Developer Info (DN)",
+  "devNameCn": "First and last name (CN)",
+  "devUnitOu": "Organizational Unit (OU)",
+  "devOrgO": "Organization (O)",
+  "devCityL": "City or Locality (L)",
+  "devStateS": "State or Province (S)",
+  "devCountryC": "Country Code (C)",
+  "genKeystoreButton": "Generate Keystore",
+  "logSignGen": "SIGNING & GENERATION LOG",
+  "clearLog": "Clear Log",
+  "logPlaceholder": "Signing and generation log will be displayed here.",
+  "signProjectScanError": "Project scan error: {error}",
+  "@signProjectScanError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "signKeystoreSelected": "Keystore selected: {path}",
+  "@signKeystoreSelected": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "signFilePickError": "File pick error: {error}",
+  "@signFilePickError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "signNoOpenProject": "No open project",
+  "signNoApkSelected": "No APK selected",
+  "signNoKeystoreSelected": "No Keystore selected",
+  "signFillAllFields": "Fill all signing fields",
+  "signApkProgress": "Signing APK: {apk}...",
+  "@signApkProgress": {
+    "placeholders": {
+      "apk": {
+        "type": "String"
+      }
+    }
+  },
+  "signKeyFile": "Key file: {key} (alias: {alias})",
+  "@signKeyFile": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      },
+      "alias": {
+        "type": "String"
+      }
+    }
+  },
+  "signRunningApksigner": "Running apksigner...",
+  "signVerifying": "Verifying signature...",
+  "signSuccess": "APK signed and verified successfully!",
+  "signVerifyFailed": "Signature verification failed or error occurred.",
+  "signError": "Error signing APK: {error}",
+  "@signError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "genKeystoreFillFields": "Fill key generation fields",
+  "genKeystoreProgress": "Generating Keystore: {name}...",
+  "@genKeystoreProgress": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "genKeystoreSuccess": "Keystore created successfully at: {name}",
+  "@genKeystoreSuccess": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "genKeystoreFailed": "Failed to create Keystore.",
+  "genKeystoreError": "Error generating Keystore: {error}",
+  "@genKeystoreError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "installApkProgress": "Starting APK installation: {apk}",
+  "@installApkProgress": {
+    "placeholders": {
+      "apk": {
+        "type": "String"
+      }
+    }
+  },
+  "installApkResult": "Installation result: {msg}",
+  "@installApkResult": {
+    "placeholders": {
+      "msg": {
+        "type": "String"
+      }
+    }
+  },
+  "installApkNotFound": "APK file not found: {path}",
+  "@installApkNotFound": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "installApkError": "Installation error: {error}",
+  "@installApkError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "glassmorphismEffects": "Glassmorphism Effects",
+  "glassOpacity": "Glass Opacity",
+  "backdropBlur": "Backdrop Blur",
+  "editorFontFamily": "Editor Font Family",
+  "fontLigatures": "Font Ligatures",
+  "fontLigaturesDescription": "Enable font ligatures in code (e.g., -> or !=)",
+  "selectFontFamily": "Select Font Family",
+  "selectLanguage": "Select Language",
+  "format": "Format",
+  "liveShare": "Live Share",
+  "hostSession": "Host Session",
+  "joinSession": "Join Session",
+  "stopSession": "Stop Session",
+  "disconnectSession": "Disconnect",
+  "sessionActive": "Session Active",
+  "hostingAt": "Hosting at:",
+  "connectedTo": "Connected to:",
+  "userName": "Your Name",
+  "usersList": "Participants",
+  "messagePlaceholder": "Type a message...",
+  "connectError": "Connection error",
+  "invalidAddress": "Invalid address",
+  "joinLink": "Session IP address",
+  "localIps": "Local IPs:",
+  "wasmPlugins": "WASM Plugins",
+  "installPlugin": "Install Plugin (.wasm)",
+  "noPluginsInstalled": "No WASM plugins installed",
+  "pluginEnabled": "Plugin enabled",
+  "pluginDisabled": "Plugin disabled",
+  "runWasmAction": "Run WASM Action",
+  "noActiveSelection": "No text selected. Apply to the entire file?",
+  "applyToSelection": "Apply to Selection",
+  "applyToDocument": "Apply to Document",
+  "logs": "Logs",
+  "clearLogs": "Clear Logs",
+  "deletePlugin": "Delete Plugin",
+  "resetToDefaults": "Reset to Defaults",
+  "welcomeTitle": "Welcome!",
+  "welcomeSubtitle": "Choose a project to work on or create a new one",
+  "lastActiveProject": "Last Active Project",
+  "runTooltip": "Run",
+  "actionsTooltip": "Actions",
+  "packagesTooltip": "Packages",
+  "extensionsAndTools": "Extensions & Tools",
+  "searchExtensionsHint": "Search extensions...",
+  "searchPubdevHint": "Search libraries on pub.dev (e.g., dio)...",
+  "tabAll": "All",
+  "tabInstalled": "Installed",
+  "tabLanguagesAndAi": "Languages & AI",
+  "tabTools": "Tools",
+  "tabBuild": "Build",
+  "tabSdkPlatforms": "SDK Platforms",
+  "tabPubLibraries": "Pub Libraries",
+  "readyToBuildApk": "Ready to build APK?",
+  "installAndroidSdkJava": "Install Android SDK & Java 17",
+  "sdkSetupDescription": "This will setup SDK, compilers, zipalign, apksigner, optimize Gradle network settings and prepare your environment for compiling projects.",
+  "initializingDevEnvironment": "Initializing development environment...",
+  "viewAction": "View",
+  "startSdkSetup": "Start environment setup",
+  "buildIssues": "Build issues?",
+  "restoreAndroidGradleEnv": "Restore Android & Gradle environment",
+  "wrenchFixDescription": "Automatically fixes AAPT2 daemon errors, sets correct project permissions, restores the resource compiler binary, and configures Gradle threads.",
+  "runningWrenchFix": "Running build environment fix...",
+  "startWrenchFix": "Run fix (Wrench Fix)",
+  "statusInstalledCaps": "INSTALLED",
+  "reinstallOrUpdateTooltip": "Reinstall / Update",
+  "updatingPackage": "Updating {name}...",
+  "@updatingPackage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "installingPackage": "Installing {name}...",
+  "@installingPackage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "installAction": "Install",
+  "searchPubdevTitle": "Search Flutter libraries",
+  "searchPubdevDescription": "Enter a library name (e.g. dio, bloc, riverpod) in the search field above and press Enter",
+  "loadError": "Load error: {error}",
+  "@loadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "addAction": "Add",
+  "openProjectToInstallLibraries": "Please open a project first to add libraries.",
+  "installingLibrary": "Installing library {name}...",
+  "@installingLibrary": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "importError": "Import error: {error}",
+  "@importError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "filesImportedSuccessfully": "Files successfully imported",
+  "dragFilesHereToImport": "Drag files here to import",
+  "selectedCount": "Selected: {count}",
+  "@selectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "selectAllTooltip": "Select All",
+  "copyTooltip": "Copy",
+  "copiedCount": "Copied objects: {count}",
+  "@copiedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cutTooltip": "Cut",
+  "cutCount": "Cut objects: {count}",
+  "@cutCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "zipTooltip": "Compress to ZIP",
+  "deleteTooltip": "Delete",
+  "foldersCount": "Folders: {count}",
+  "@foldersCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "askAiAction": "Ask AI",
+  "explainAiAction": "AI: Explain",
+  "documentAiAction": "AI: Document",
+  "testAiAction": "AI: Generate Tests",
+  "optimizeAiAction": "AI: Optimize",
+  "pasteCount": "Paste ({count})",
+  "@pasteCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "archiveNameHint": "Archive name",
+  "compressAction": "Compress",
+  "archiveCreatedSuccessfully": "Archive successfully created!",
+  "compressionError": "Compression error: {error}",
+  "@compressionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "archiveExtractedSuccessfully": "Archive successfully extracted!",
+  "extractionError": "Extraction error: {error}",
+  "@extractionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteSelectedTitle": "Delete selected?",
+  "deleteSelectedConfirmation": "Are you sure you want to delete {count} items?",
+  "@deleteSelectedConfirmation": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "selectedElementsDeleted": "Selected items deleted!",
+  "deleteError": "Delete error: {error}",
+  "@deleteError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "filesPastedSuccessfully": "Files successfully pasted!",
+  "pasteError": "Paste error: {error}",
+  "@pasteError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "repositoryNotFound": "Repository not found",
+  "initGitRepoDescription": "Initialize a local Git repository to track changes.",
+  "initGitAction": "Initialize Git",
+  "gitConflicted": "CONFLICTS",
+  "gitStaged": "STAGED",
+  "gitModified": "MODIFIED",
+  "gitUntracked": "UNTRACKED",
+  "commitMessageHint": "Commit message...",
+  "resetChangesTitle": "Reset changes?",
+  "resetChangesConfirmation": "Are you sure you want to permanently reset all uncommitted changes in this file?",
+  "resetAction": "Reset",
+  "changesReset": "Changes reset",
+  "resetError": "Reset error: {error}",
+  "@resetError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "normalView": "Normal view",
+  "splitView": "Split view (Side-by-Side)",
+  "stagedMessage": "File staged",
+  "unstagedMessage": "File unstaged",
+  "stageError": "Staging error: {error}",
+  "@stageError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToLoadChanges": "Failed to load changes",
+  "noChanges": "No changes",
+  "fileIdenticalToHead": "This file is identical to HEAD",
+  "runTerminalTooltip": "Run",
+  "restartTerminalTooltip": "Restart",
+  "consoleSubTab": "Console",
+  "signApkSubTab": "Sign APK",
+  "copiedToClipboard": "Copied to clipboard",
+  "back": "Back",
+  "tryChangingSearchQuery": "Try changing search query",
+  "incomingBranch": "Incoming branch",
+  "resolveConflictsBeforeSaving": "Please resolve all conflicts before saving!",
+  "fileSavedAndStaged": "File successfully saved and staged to Git index",
+  "saveError": "Error saving: {error}",
+  "@saveError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "acceptMerge": "Accept Merge",
+  "errorLoadingConflictFile": "Error loading conflict file",
+  "conflictsNotFound": "Conflicts not found",
+  "noConflictMarkersFound": "No standard Git merge markers found in this file.",
+  "backToGit": "Back to Git",
+  "conflictBlock": "Conflict block",
+  "currentChangesOurs": "Current changes (Ours / HEAD)",
+  "incomingChanges": "Incoming changes ({branch})",
+  "@incomingChanges": {
+    "placeholders": {
+      "branch": {
+        "type": "String"
+      }
+    }
+  },
+  "useThisVersion": "Use this version",
+  "mergeResultEditable": "Merge result (Editable)",
+  "chooseVersionOrWriteHint": "Choose one of the versions above or write your own merge resolution...",
+  "markAsResolvedHint": "* To mark this block as resolved, enter or choose text.",
+  "emptyLabel": "(Empty)",
+  "stageAction": "Stage",
+  "unstageAction": "Unstage",
+  "cursorColor": "CURSOR COLOR",
+  "or": "OR",
+  "ipCopiedToClipboard": "IP copied to clipboard",
+  "editingFile": "Editing: {file}",
+  "@editingFile": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "viewingProject": "Viewing project",
+  "noProblemsFound": "No problems found in workspace",
+  "problemsList": "Problems List",
+  "sendToAi": "Send to AI",
+  "helpMeFixErrors": "Please help me fix the following compilation errors in my project:",
+  "lineColumn": "Line {line}, Column {col}",
+  "@lineColumn": {
+    "placeholders": {
+      "line": {
+        "type": "int"
+      },
+      "col": {
+        "type": "int"
+      }
+    }
+  },
+  "decreaseFontSize": "Decrease Font Size",
+  "increaseFontSize": "Increase Font Size",
+  "undo": "Undo",
+  "redo": "Redo",
+  "moveLeft": "Move Left",
+  "moveUp": "Move Up",
+  "moveDown": "Move Down",
+  "moveRight": "Move Right",
+  "edit": "Edit",
+  "packagesAndEnv": "Packages & Env",
+  "packagesInstalledCount": "Installed: {count}/{total}",
+  "@packagesInstalledCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "flutterProject": "Flutter Project",
+  "pythonProject": "Python Project",
+  "nodejsProject": "Node.js Project",
+  "dartProject": "Dart Project",
+  "webProject": "Web Project",
+  "androidProject": "Android Project",
+  "rustProject": "Rust Project",
+  "genericProject": "Project",
+  "runPC": "Run (PC)",
+  "runMob": "Run (Mob)",
+  "startServer": "Start Server",
+  "buildAPK": "Build APK",
+  "startTheProject": "Start the project",
+  "outputCopied": "Output copied",
+  "console": "Console",
+  "signApk": "Sign APK",
+  "buildPC": "Build (PC)",
+  "resetPlugins": "Reset Plugins",
+  "resetPluginsConfirmation": "This will remove all installed custom plugins and restore default plugins. Continue?",
+  "resetPluginsTitle": "Reset Plugins?",
+  "installWasm": "Install .wasm",
+  "availableActions": "Available Actions:",
+  "logsTerminal": "Logs Terminal",
+  "noLogsCaptured": "No logs captured yet",
+  "installWasmPluginTitle": "Install WASM Plugin",
+  "selectWasmFile": "Select .wasm file",
+  "pluginName": "Plugin Name",
+  "nameRequired": "Name is required",
+  "pluginDescription": "Description",
+  "descriptionRequired": "Description is required",
+  "exposedActions": "Exposed Actions",
+  "add": "Add",
+  "pickWasmFileFirst": "Please pick a .wasm file first",
+  "pluginInstalledSuccessfully": "Plugin installed successfully",
+  "failedToInstall": "Failed to install: {error}",
+  "@failedToInstall": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "mcpServersTitle": "AI Modules: MCP Servers",
+  "activeServers": "Active Servers ({count})",
+  "@activeServers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "repository": "Repository",
+  "noMcpServers": "No MCP servers added",
+  "goToRepository": "Go to Repository",
+  "addManually": "Add Manually",
+  "addServerManually": "Add Server Manually",
+  "installed": "INSTALLED",
+  "packageDetail": "Package: {detail}",
+  "@packageDetail": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "authParam": "Auth parameter: {key}",
+  "@authParam": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "enterValueFor": "Enter value for {key}",
+  "@enterValueFor": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "enterLabel": "Enter {label}",
+  "@enterLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "installPreset": "Install: {name}",
+  "@installPreset": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "serverName": "Server Name",
+  "exampleLocalSearch": "For example: local-search",
+  "connectionType": "Connection Type",
+  "stdioLocal": "Stdio (Local process)",
+  "sseHttp": "SSE (HTTP stream)",
+  "startCommand": "Start Command",
+  "exampleStartCommand": "For example: node or npx or python3",
+  "argsSpace": "Arguments (separated by space)",
+  "searchFilesHint": "Search files... (type \"#\" for symbols)",
+  "searchSymbolsHint": "Search symbols in code...",
+  "modeFiles": "MODE: FILES",
+  "modeSymbols": "MODE: SYMBOLS",
+  "resultsCount": "Results: {count}",
+  "@resultsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noResults": "No results found",
+  "confirmDeleteMultiple": "Are you sure you want to delete {count} items?",
+  "@confirmDeleteMultiple": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "archiveExtracted": "Archive successfully extracted!",
+  "archiveCreated": "Archive successfully created!",
+  "compressToZip": "Compress to ZIP",
+  "folderLabel": "Folder: {name}",
+  "@folderLabel": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "fileLabel": "File: {name}",
+  "@fileLabel": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "whatShouldAiDoFolder": "What should AI do with this folder?",
+  "whatShouldAiDoFile": "What should AI do with this file?",
+  "askAi": "Ask AI",
+  "askAiDesc": "Interactive chat with AI assistant",
+  "explainStructure": "AI: Explain Structure",
+  "explainStructureDesc": "Detailed summary of code or folders",
+  "addDoc": "AI: Add Documentation",
+  "addDocDesc": "Generate docstrings and comments",
+  "generateTests": "AI: Generate Tests",
+  "generateTestsDesc": "Write unit tests for the code",
+  "optimizeCode": "AI: Optimize",
+  "optimizeCodeDesc": "Suggest performance improvements",
+  "newFileDesc": "Create a file in this folder",
+  "newFolderDesc": "Create a subfolder",
+  "removeFromBookmarks": "Remove from Bookmarks",
+  "removeFromBookmarksDesc": "Remove file from quick access",
+  "addToBookmarks": "Add to Bookmarks",
+  "addToBookmarksDesc": "Pin file for quick access",
+  "copyDesc": "Add to clipboard",
+  "cutDesc": "Move files",
+  "pasteDesc": "Paste copied items",
+  "renameDesc": "Change item name",
+  "extractZip": "Extract ZIP",
+  "extractZipDesc": "Extract files from archive",
+  "compressZip": "Compress to ZIP",
+  "compressZipDesc": "Create ZIP archive",
+  "compressSelectedZip": "Compress selected to ZIP",
+  "compressSelectedZipDesc": "Create archive from selected items",
+  "deleteDesc": "Permanent delete",
+  "empty": "empty",
+  "nameFolderHint": "folder_name",
+  "nameFileHint": "file_name.txt",
+  "itemMoved": "Item successfully moved",
+  "moveError": "Move error: {error}",
+  "@moveError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "image": "IMAGE",
+  "document": "DOCUMENT",
+  "failedToLoadImage": "Failed to load image",
+  "failedToReadFile": "Failed to read file: {error}",
+  "@failedToReadFile": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "aiSettings": "AI Settings",
+  "provider": "Provider",
+  "model": "Model",
+  "apiKey": "API Key",
+  "customBaseUrl": "Custom Base URL",
+  "defaultHint": "Default: {url}",
+  "@defaultHint": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "chatWithAi": "CHAT WITH AI",
+  "chatHistory": "Chat History",
+  "newChat": "New Chat",
+  "internetAccess": "Internet Access",
+  "mcpServers": "MCP Servers",
+  "manualMode": "Manual Mode",
+  "safeAutopilot": "Safe Autopilot",
+  "fullAutonomy": "Full Autonomy",
+  "agentsNotInstalled": "Agents not installed",
+  "installGeminiCliInSettings": "Install gemini-cli in settings",
+  "stopAgent": "STOP AGENT",
+  "withChanges": "with changes",
+  "attachOpenFile": "Attach open file",
+  "noHistoryFound": "No history found",
+  "untitled": "Untitled",
+  "messagesCount": "{count} messages",
+  "@messagesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "systemEnv": "System Environment",
+  "fixEnvironmentArm64": "Fix Environment (ARM64)",
+  "environment": "Environment",
+  "collapseAll": "Collapse All",
+  "elementMovedToRoot": "Element moved to root",
+  "bookmarks": "Bookmarks",
+  "noActiveWasmPlugins": "No active WASM plugins",
+  "selectPluginAction": "Select Plugin Action",
+  "noSelection": "No selection",
+  "applyPluginToFile": "Apply plugin action to the entire file?",
+  "pluginExecutedSuccess": "Plugin executed successfully",
+  "executionError": "Execution error: {error}",
+  "@executionError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quickSearch": "Quick Search (Ctrl+P)",
+  "saveTooltip": "Save",
+  "runWasmPlugin": "Run WASM Plugin",
+  "aiChat": "AI Chat",
+  "home": "Home",
+  "pendingDiff": "Pending Diff",
+  "keep": "Keep",
+  "reject": "Reject",
+  "keepAll": "Keep all",
+  "ranAction": "Ran: {content}",
+  "@ranAction": {
+    "placeholders": {
+      "content": {
+        "type": "String"
+      }
+    }
+  },
+  "created": "Created",
+  "deleted": "Deleted",
+  "edited": "Edited",
+  "taskExecution": "Task Execution",
+  "stepNumber": "Step {step}/{total}",
+  "@stepNumber": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "filesChangedCount": "Files changed: {count} (+{additions} -{deletions})",
+  "@filesChangedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "additions": {
+        "type": "int"
+      },
+      "deletions": {
+        "type": "int"
+      }
+    }
+  },
+  "commandsExecutedCount": "Executed {count} commands",
+  "@commandsExecutedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "changesAccepted": "Changes accepted and stashed",
+  "undoneChanges": "Undid {count} file changes",
+  "@undoneChanges": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "discardedFileChanges": "Discarded changes in {file}",
+  "@discardedFileChanges": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "thinking": "Thinking...",
+  "planner": "PLANNER",
+  "coder": "CODER",
+  "validator": "VALIDATOR",
+  "aiAgentRole": "AI-AGENT",
+  "resubmit": "Resubmit",
+  "rollbackHistoryToStep": "Rollback history and code to this step",
+  "confirmRollback": "Confirm Rollback",
+  "rollbackConfirmationText": "All code changes made after this message will be reverted, and subsequent messages deleted. Continue?",
+  "yesRollback": "Yes, rollback",
+  "changesApplied": "Changes applied",
+  "codeCopied": "Code copied to clipboard",
+  "outOfScope": "Out of scope!",
+  "low": "Low",
+  "medium": "Medium",
+  "high": "High",
+  "applied": "Applied",
+  "resolveConflictTooltip": "Resolve conflict",
+  "panel1": "PANEL 1",
+  "panel2": "PANEL 2",
+  "localWebServer": "Local Web Server",
+  "webServerDesc": "Start web server to preview your project's build results right inside the IDE.",
+  "startWebServer": "Start Web Server",
+  "stopWebServer": "Stop Web Server",
+  "copyAll": "Copy All",
+  "clearTerminal": "Clear Terminal",
+  "openInExternalBrowser": "Open in external browser",
+  "search": "Search",
+  "structure": "Structure",
+  "disk": "Disk",
+  "plugins": "Plugins",
+  "added": "added",
+  "removed": "removed",
+  "modified": "modified",
+  "selectedObjectsCount": "Selected objects: {count}",
+  "@selectedObjectsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "explainFolderPreset": "Explain the purpose and structure of this folder.",
+  "explainFilePreset": "Explain in detail the purpose and operational logic of this file.",
+  "addDocFolderPreset": "Add documentation, docstrings, and detailed comments to the code in all files of this folder.",
+  "addDocFilePreset": "Add clear documentation, docstrings, and detailed comments to the code in this file.",
+  "generateTestsFolderPreset": "Write unit tests for the files in this folder.",
+  "generateTestsFilePreset": "Write comprehensive unit tests for the code in this file.",
+  "optimizeFolderPreset": "Analyze the code in this folder and suggest optimizations for performance and readability.",
+  "optimizeFilePreset": "Analyze the code in this file and suggest options for optimizing performance, readability, and architecture.",
+  "deleteSelected": "Delete Selected",
+  "manual": "Manual",
+  "autoSafe": "Auto:Safe",
+  "autoFull": "Auto:Full",
+  "filesCount": "{count} {count, plural, =1{file} other{files}}",
+  "@filesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "localAiEngineTitle": "LOCAL AI ENGINE",
+  "ollamaRunningLocally": "Ollama is running locally",
+  "ollamaRunningLocallyDesc": "Make sure Ollama is running on your system. You can start it with \"ollama serve\" and pull models with \"ollama pull <model>\".",
+  "lmStudioRunningLocally": "LM Studio is running locally",
+  "lmStudioRunningLocallyDesc": "Make sure LM Studio server is running. You can enable Local Server in the LM Studio application and load the required model.",
+  "ollamaNotDetected": "Ollama not detected",
+  "ollamaNotDetectedDesc": "Install Ollama on your device and make sure it is running. The URL can be modified above.",
+  "checkConnection": "Check Connection",
+  "availableOllamaModels": "AVAILABLE OLLAMA MODELS",
+  "llamaServerInstallRequired": "llama-server Installation Required",
+  "llamaServerInstallRequiredDesc": "Llama-server engine is required to run local AI models. Click the button below to install it automatically.",
+  "installing": "Installing...",
+  "installLlamaServerRuntime": "Install Llama Server Runtime",
+  "ollamaModelsTitle": "OLLAMA MODELS",
+  "localAiModelsTitle": "LOCAL AI MODELS",
+  "serverStatusAndControl": "SERVER STATUS & CONTROL",
+  "downloadOllamaModelPrompt": "Download at least one Ollama model to get started.",
+  "downloadModelToStartServerPrompt": "Download at least one model above to launch the local server.",
+  "localLlamaServerLabel": "Local llama-server",
+  "connected": "Connected",
+  "runningPort8080": "Running (port 8080)",
+  "starting": "Starting...",
+  "stopped": "Stopped",
+  "start": "Start",
+  "gbFormat": "{size} GB",
+  "@gbFormat": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "ramGbFormat": "~{size} GB RAM",
+  "@ramGbFormat": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "select": "Select",
+  "download": "Download",
+  "refreshPreview": "Refresh Preview",
+  "inFolder": "in {folder}",
+  "@inFolder": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "llamaServerBuiltIn": "llama-server (built-in)",
+  "localAiDisplayName": "Local AI",
+  "notRequired": "not required",
+  "mcpGithubDesc": "Integration with GitHub repositories, issues, and PRs.",
+  "mcpGoogleSearchDesc": "Allows the AI agent to perform live Google searches.",
+  "mcpFetchDesc": "Download web pages and automatically translate them to Markdown.",
+  "mcpPostgresDesc": "Connect, read table structure, and run SQL queries on PostgreSQL.",
+  "mcpPostgresArg": "Connection string (postgresql://...)",
+  "mcpSqliteDesc": "Connect and inspect SQLite databases in your project.",
+  "mcpSqliteArg": "Path to SQLite DB file (e.g. db.sqlite)",
+  "mcpMemoryDesc": "Semantic long-term memory storage for your AI agent.",
+  "mcpBraveSearchDesc": "Allows the AI agent to perform web searches using the Brave API.",
+  "mcpPuppeteerDesc": "Browser automation, screenshot generation, element clicking, and web scraping.",
+  "mcpFirecrawlDesc": "Convert any website into clean Markdown or structured JSON.",
+  "mcpNotionDesc": "Read and modify Notion pages, databases, and comments.",
+  "mcpSlackDesc": "Provides the ability to read channels, chat, and send notifications in Slack.",
+  "mcpGitDesc": "View commits, compare versions, search commits, and inspect files locally via Git.",
+  "mcpGitlabDesc": "Manage GitLab projects, issues, PRs, and CI/CD pipelines.",
+  "mcpSentryDesc": "Retrieve error logs and inspect crashes of your application on Sentry.",
+  "mcpAirtableDesc": "Read, create, and update records in Airtable databases and tables.",
+  "mcpSequentialThinkingDesc": "Organize AI agent thoughts for structured problem solving.",
+  "phantomProcessesTitle": "Phantom Processes (Android 12/13+)",
+  "phantomProcessesVersion": "ADB configuration required for stable compilation",
+  "phantomProcessesError": "In Android 12+, the system process killer (Phantom Process Killer) terminates builds (Gradle/Java/Node/Dart) if the limit exceeds 32 active processes.\n\nTo disable, run via ADB on your PC:\n\nadb shell \"/system/bin/device_config put activity_manager max_phantom_processes 2147483647\"\n\nadb shell \"/system/bin/settings put global settings_enable_monitor_phantom_procs false\"",
+  "androidJarCorruptError": "android.jar is corrupt ({api}). Click \"Fix Environment\" to reinstall.",
+  "@androidJarCorruptError": {
+    "placeholders": {
+      "api": {
+        "type": "String"
+      }
+    }
+  },
+  "androidSdkPlatformsHealthy": "android-35 / android-36 — healthy",
+  "checkFailed": "Check failed: {error}",
+  "@checkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "analyzingTaskAndPlanning": "Analyzing task & planning...",
+  "agentStepLimitExceeded": "🤖 Agent step limit ({limit}) exceeded. Autopilot stopped.",
+  "@agentStepLimitExceeded": {
+    "placeholders": {
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "generatingCodeChanges": "Generating code changes...",
+  "executionPlanConstructed": "📝 Execution plan constructed. Transitioning to Coder role...",
+  "verifyingImplementation": "Verifying implementation correctness...",
+  "blockedUnsafeActions": "❌ Blocked unsafe actions outside workspace scope:\n{blockedText}",
+  "@blockedUnsafeActions": {
+    "placeholders": {
+      "blockedText": {
+        "type": "String"
+      }
+    }
+  },
+  "awaitingApprovalHighRisk": "⚠️ Awaiting approval: High-risk actions detected or autopilot is restricted. Please approve them in the AI panel.",
+  "autopilotStepSummary": "🤖 Autopilot (step {step}): Auto-Approval of actions:\n{actionsListText}\n\nResults:\n{results}",
+  "@autopilotStepSummary": {
+    "placeholders": {
+      "step": {
+        "type": "int"
+      },
+      "actionsListText": {
+        "type": "String"
+      },
+      "results": {
+        "type": "String"
+      }
+    }
+  },
+  "runningStaticAnalysis": "Running project static analysis (dart analyze)...",
+  "agentFailedToFixErrors": "⚠️ Agent failed to fix errors after {maxAttempts} attempts.\n\n**Remaining errors:**\n{errorReport}\n\nPlease describe the issue or fix manually.",
+  "@agentFailedToFixErrors": {
+    "placeholders": {
+      "maxAttempts": {
+        "type": "int"
+      },
+      "errorReport": {
+        "type": "String"
+      }
+    }
+  },
+  "fixingCompilationErrors": "Fixing compilation errors...",
+  "readingFile": "Reading file {path}...",
+  "@readingFile": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "savingFile": "Saving file {path}...",
+  "@savingFile": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "deletingFile": "Deleting file {path}...",
+  "@deletingFile": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "runningCommandStatus": "Running command \"{command}\"...",
+  "@runningCommandStatus": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "searchingCode": "Searching code: \"{query}\"...",
+  "@searchingCode": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "listingDirectory": "Listing directory {path}...",
+  "@listingDirectory": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "findingSymbols": "Finding symbols: \"{query}\"...",
+  "@findingSymbols": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "searchingWeb": "Searching web: \"{query}\"...",
+  "@searchingWeb": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "fetchingWebPage": "Fetching web page: {path}...",
+  "@fetchingWebPage": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "executingAction": "Executing action...",
+  "runningCommandLabel": "🤖 Running command: {command}...",
+  "@runningCommandLabel": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "applyingChangeLabel": "🤖 Applying change: {path}...",
+  "@applyingChangeLabel": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "commandSentToTerminalLabel": "🤖 Command \"{command}\" sent to terminal.",
+  "@commandSentToTerminalLabel": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      }
+    }
+  },
+  "runningCommandResultLabel": "Command \"{command}\" executed. Result:\n{result}",
+  "@runningCommandResultLabel": {
+    "placeholders": {
+      "command": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "fileNotFound": "File not found: {path}",
+  "@fileNotFound": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "fileContentsHeader": "File contents of `{path}` ({lineCount} lines):\n\n```\n{truncated}\n```",
+  "@fileContentsHeader": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      },
+      "lineCount": {
+        "type": "int"
+      },
+      "truncated": {
+        "type": "String"
+      }
+    }
+  },
+  "fileTruncatedSuffix": "... [truncated to 8000 chars from {lineCount} lines]",
+  "@fileTruncatedSuffix": {
+    "placeholders": {
+      "lineCount": {
+        "type": "int"
+      }
+    }
+  },
+  "safetyGuardFileOutsideWorkspace": "Error: Attempted file modification outside the project scope.",
+  "commandRefPathOutsideWorkspace": "Security error: Command references path outside project scope.",
+  "commandBlockedUnsafe": "Security error: Command contains blocked instruction \"{blocked}\".",
+  "@commandBlockedUnsafe": {
+    "placeholders": {
+      "blocked": {
+        "type": "String"
+      }
+    }
+  },
+  "aiSearchNoMatches": "No matches found for \"{query}\".",
+  "@aiSearchNoMatches": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "aiSearchMatchesFound": "Found {matchCount} matches for \"{query}\":\n\n{results}",
+  "@aiSearchMatchesFound": {
+    "placeholders": {
+      "matchCount": {
+        "type": "int"
+      },
+      "query": {
+        "type": "String"
+      },
+      "results": {
+        "type": "String"
+      }
+    }
+  },
+  "searchSymbolsNoMatches": "No symbols found matching \"{query}\".",
+  "@searchSymbolsNoMatches": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "searchSymbolsMatchesFound": "Found {count} symbols matching \"{query}\":\n\n{results}",
+  "@searchSymbolsMatchesFound": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "query": {
+        "type": "String"
+      },
+      "results": {
+        "type": "String"
+      }
+    }
+  },
+  "searchSymbolsItem": "- [{type}] {name} (file: {path}, line: {line})",
+  "@searchSymbolsItem": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "path": {
+        "type": "String"
+      },
+      "line": {
+        "type": "int"
+      }
+    }
+  },
+  "directoryNotFound": "Directory not found: {path}",
+  "@directoryNotFound": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "directoryEmpty": "Directory is empty.",
+  "directoryContentsHeader": "Directory contents:\n\n{items}",
+  "@directoryContentsHeader": {
+    "placeholders": {
+      "items": {
+        "type": "String"
+      }
+    }
+  },
+  "mcpMissingParams": "Error: MCP server or tool name is not specified.",
+  "unknownAction": "Unknown action type: {type}",
+  "@unknownAction": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToApplyActionWithError": "Failed to apply action: {error}",
+  "@failedToApplyActionWithError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "searchQueryEmpty": "Error: Search query is empty.",
+  "workspaceNotFound": "Error: Workspace not found.",
+  "webPreviewStopped": "Web Preview Stopped",
+  "webPreviewStartInstructions": "Start server and click Play button.",
+  "modelDescQwen1_5b": "Optimized model for coding. Very fast, suitable for all devices.",
+  "modelDescQwen7b": "Powerful model for complex coding tasks. Requires a high-performance device.",
+  "modelDescLlama1b": "Lightweight language model from Meta. High operational speed.",
+  "modelDescLlama3b": "Balanced model from Meta. Good context understanding.",
+  "modelDescOllamaQwen1_5b": "Lightweight and fast coding model from Alibaba.",
+  "modelDescOllamaQwen7b": "Powerful model for a wide range of programming tasks.",
+  "modelDescOllamaLlama1b": "Compact model from Meta, great for light tasks.",
+  "modelDescOllamaLlama3b": "Balanced model from Meta for general tasks and dialogues.",
+  "modelDescOllamaDeepseek1_3b": "Specialized coding model from DeepSeek.",
+  "modelDescOllamaDeepseek6_7b": "Highly efficient coding model from DeepSeek.",
+  "modelDescOllamaMistral7b": "Versatile general-purpose model with good understanding of code.",
+  "modelDescOllamaGemma2b": "Efficient and accurate compact model from Google.",
+  "modelDescOllamaGemma9b": "Powerful general-purpose language model from Google.",
+  "collabSessionCreated": "Session created on port {port}.",
+  "@collabSessionCreated": {
+    "placeholders": {
+      "port": {
+        "type": "int"
+      }
+    }
+  },
+  "collabSessionCreateError": "Error creating session: {error}",
+  "@collabSessionCreateError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "collabUserDisconnected": "User {name} disconnected.",
+  "@collabUserDisconnected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "collabConnectError": "Error connecting to {url}: {error}",
+  "@collabConnectError": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      },
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "collabConnectionLost": "Connection to session lost.",
+  "collabUserJoined": "User {name} joined.",
+  "@collabUserJoined": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "collabJoinedAsGuest": "You joined the session as a guest.",
+  "collabUserLeft": "User {name} left the session.",
+  "@collabUserLeft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "webPreviewNotSupported": "Web preview is not supported on this platform",
+  "webPreviewNotSupportedDesc": "Embedded WebView is not supported on this platform. Use the top right button to open in an external browser.",
+  "debugger": "Debugger",
+  "startDebugging": "Start Debugging",
+  "stopDebugging": "Stop Debugging",
+  "continue_": "Continue",
+  "stepOver": "Step Over",
+  "stepIn": "Step In",
+  "stepOut": "Step Out",
+  "pause": "Pause",
+  "restart": "Restart",
+  "callStack": "Call Stack",
+  "variables": "Variables",
+  "breakpoints": "Breakpoints",
+  "output": "Output",
+  "launchConfiguration": "Launch Configuration",
+  "programToDebug": "Program to debug",
+  "noStackFrames": "No stack frames",
+  "noVariables": "No variables",
+  "noOutput": "No output",
+  "localModels": "Local Models",
+  "all": "All",
+  "downloaded": "Downloaded",
+  "vision": "Vision",
+  "uncensored": "Uncensored",
+  "noModelsFound": "No models found",
+  "unload": "Unload",
+  "load": "Load",
+  "attachImage": "Attach Image",
+  "modeChat": "Chat",
+  "modeRefactor": "Refactor",
+  "modeAutopilot": "Autopilot",
+  "quickPromptRefactor": "Refactor",
+  "quickPromptRefactorText": "Refactor this code",
+  "quickPromptExplain": "Explain",
+  "quickPromptExplainText": "Explain how this code works",
+  "quickPromptFixErrors": "Fix Errors",
+  "quickPromptFixErrorsText": "Find and fix errors in this code",
+  "quickPromptOptimize": "Optimize",
+  "quickPromptOptimizeText": "Optimize performance of this code",
+  "quickPromptWriteTests": "Write Tests",
+  "quickPromptWriteTestsText": "Write unit tests for this code",
+  "actionReadingFile": "Reading file",
+  "actionViewingFolder": "Viewing folder",
+  "actionSearchingCode": "Searching code",
+  "actionFindingSymbol": "Finding symbol",
+  "actionCreatingFile": "Creating file",
+  "actionEditingFile": "Editing file",
+  "actionDeletingFile": "Deleting file",
+  "actionRunningCommand": "Running command",
+  "actionWebSearch": "Searching the web",
+  "actionFetchingPage": "Fetching page",
+  "actionMcpTool": "MCP tool",
+  "actionExecuting": "Executing action",
+  "sessionRestored": "Session restored",
+  "sessionRestoredDetail": "Loaded {count} messages from `.quantum/chat_history.json`.\nAgent memory: {files} files in context.\nContinue where you left off.",
+  "@sessionRestoredDetail": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "files": {
+        "type": "int"
+      }
+    }
+  },
+  "signInWithGitHub": "Sign in with GitHub",
+  "gitHubToken": "GitHub Personal Access Token",
+  "gitHubTokenHint": "Paste GitHub Personal Access Token (classic or fine-grained with repo scope)",
+  "connectGitHubDesc": "Log in to browse your repositories, clone projects, and trigger automated cloud builds.",
+  "cloneAndOpen": "Clone & Open",
+  "cloningRepository": "Cloning repository...",
+  "repoClonedSuccess": "Repository cloned successfully to {path}",
+  "@repoClonedSuccess": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "cloneFailed": "Failed to clone repository. Check connection or token permissions.",
+  "cloudBuildApk": "Release & Cloud Build APK",
+  "cloudBuildApkDesc": "Tag this version, push changes, and trigger GitHub Actions to build an APK and publish a release.",
+  "releaseTagName": "Release Tag",
+  "releaseTagNameHint": "e.g. v1.0.0",
+  "releaseCommitMsg": "Commit Message",
+  "releaseCommitMsgHint": "e.g. chore: prepare release v1.0.0",
+  "releaseNotes": "Release Notes / What's New",
+  "releaseNotesHint": "Describe what was added, fixed or improved...",
+  "publishReleaseBtn": "Publish Release & Build APK",
+  "releasingAndPushing": "Creating release tag & pushing to GitHub Actions...",
+  "releaseTriggeredSuccess": "Release {tag} created and pushed! Cloud APK build started on GitHub Actions.",
+  "@releaseTriggeredSuccess": {
+    "placeholders": {
+      "tag": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseTriggerFailed": "Failed to push release: {error}",
+  "@releaseTriggerFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "setupCiCdWorkflow": "Add Cloud Build CI/CD Workflow",
+  "setupCiCdWorkflowSuccess": "GitHub Actions APK workflow added (.github/workflows/build-apk.yml)!",
+  "sessionsTitle": "SESSIONS",
+  "sessionRunning": "Running",
+  "sessionExited": "Exited",
+  "newSession": "New Session",
+  "terminalMenu": "Terminal Menu",
+  "splitScreen": "Split Screen",
+  "mergeScreen": "Merge Screen",
+  "keepScreenOn": "Keep Screen On (Wakelock)",
+  "keepScreenOnActive": "Keep Screen On (Active)",
+  "interruptProcess": "Interrupt (Ctrl+C)",
+  "selectTextInTerminal": "Select Text in Terminal",
+  "closeSelection": "Close ✕",
+  "keypadKb": "KB",
+  "keypadMore": "More",
+  "installApk": "Install APK",
+  "projectSync": "Project Sync",
+  "projectSynced": "Project Synced",
+  "syncFailed": "Sync Failed",
+  "syncing": "Syncing...",
+  "shareProjectSyncLogs": "Quantum IDE - Project sync log",
+  "files": "Files",
+  "editor": "Editor",
+  "closeOthers": "Close Others",
+  "closeToRight": "Close to the Right",
+  "copyPath": "Copy Path",
+  "insert": "Insert",
+  "addCustomMcp": "Add Custom MCP",
+  "unifiedThemeTitle": "Unified Theme (Terminal + Editor + IDE)",
+  "unifiedThemeSubtitle": "Apply terminal palette colors to editor & app UI",
+  "palettesAndPresets": "Palettes, Background & Presets (Conduit)",
+  "codeCrafterEngine": "Flutter CodeCrafter Engine",
+  "codeCrafterEngineSubtitle": "Use flutter_code_crafter editor widget (LSP, folding, breakpoints, AI)",
+  "thinkingAgent": "Agent Thoughts",
+  "thinkingNow": "Thinking…",
+  "generatingResponse": "Generating response…",
+  "runningAgentStep": "Running agent step…",
+  "exploredLabel": "Explored",
+  "acceptFile": "Accept File",
+  "revertFile": "Revert File"
+}

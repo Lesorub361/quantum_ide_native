@@ -1,0 +1,2094 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:quantum_ide/core/theme/conduit_palette.dart';
+import 'package:quantum_ide/features/terminal/conduit/conduit_appearance_sheet.dart';
+import 'package:re_editor/re_editor.dart';
+import 'package:path/path.dart' as p;
+import 'package:quantum_ide/core/services/code_crafter_ai_service.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/code_crafter_editor_wrapper.dart';
+import 'package:quantum_ide/features/editor/presentation/notifiers/editor_notifier.dart';
+import 'package:quantum_ide/features/editor/presentation/handlers/autocomplete_handler.dart'
+    hide CodeKeywordPrompt;
+import 'package:quantum_ide/features/editor/presentation/handlers/snippet_prompt.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/diff_gutter_indicator.dart';
+import 'package:quantum_ide/core/services/settings_service.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/diagnostic_indicator.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/code_find_panel.dart';
+import 'package:quantum_ide/core/models/code_diagnostic.dart';
+import 'package:quantum_ide/core/services/diff_service.dart';
+import 'package:re_highlight/languages/dart.dart';
+import 'package:re_highlight/languages/json.dart';
+import 'package:re_highlight/languages/xml.dart';
+import 'package:re_highlight/languages/javascript.dart';
+import 'package:re_highlight/languages/yaml.dart';
+import 'package:re_highlight/languages/markdown.dart';
+import 'package:re_highlight/languages/python.dart';
+import 'package:re_highlight/languages/cpp.dart';
+import 'package:re_highlight/languages/java.dart';
+import 'package:re_highlight/languages/php.dart';
+import 'package:re_highlight/styles/atom-one-dark.dart';
+import '../../../../core/theme/editor_syntax_themes.dart';
+import 'package:re_highlight/styles/vs2015.dart';
+import 'package:re_highlight/styles/github-dark.dart';
+import 'package:re_highlight/styles/github-dark-dimmed.dart';
+import 'package:re_highlight/styles/nord.dart';
+import 'package:re_highlight/styles/monokai.dart';
+import 'package:re_highlight/styles/tokyo-night-dark.dart';
+import 'package:re_highlight/styles/night-owl.dart';
+import 'package:re_highlight/styles/androidstudio.dart';
+import 'package:quantum_ide/shared/widgets/glass_container.dart';
+import 'package:quantum_ide/l10n/app_localizations.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/collaboration_painter.dart';
+import 'package:quantum_ide/core/services/service_providers.dart';
+import 'package:quantum_ide/features/editor/presentation/widgets/editor_minimap.dart';
+
+class DiffBackgroundPainter extends CustomPainter {
+  final CodeIndicatorValueNotifier? notifier;
+  final List<DiffMarker> markers;
+
+  DiffBackgroundPainter({required this.notifier, required this.markers})
+    : super(repaint: notifier);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final val = notifier?.value;
+    if (val == null || markers.isEmpty) return;
+
+    final paint = Paint();
+    for (final paragraph in val.paragraphs) {
+      final lineIndex = paragraph.index;
+      DiffMarker? marker;
+      for (var i = 0; i < markers.length; i++) {
+        if (markers[i].line == lineIndex) {
+          marker = markers[i];
+          break;
+        }
+      }
+
+      if (marker != null) {
+        switch (marker.type) {
+          case DiffType.added:
+            paint.color = const Color(0xFF10B981).withValues(alpha: 0.14);
+            break;
+          case DiffType.removed:
+            paint.color = const Color(0xFFEF4444).withValues(alpha: 0.14);
+            break;
+          case DiffType.modified:
+            paint.color = const Color(0xFFF59E0B).withValues(alpha: 0.14);
+            break;
+        }
+
+        final rect = Rect.fromLTWH(
+          0,
+          paragraph.offset.dy,
+          size.width,
+          paragraph.paragraph.height,
+        );
+        canvas.drawRect(rect, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DiffBackgroundPainter oldDelegate) {
+    return oldDelegate.markers != markers || oldDelegate.notifier != notifier;
+  }
+}
+
+// ─── Стабильный виджет редактора ─────────────────────────────────────────────
+// Каждый открытый файл имеет СВОЙ постоянный StableEditorWidget.
+// IndexedStack в EditorPage держит все экземпляры живыми одновременно —
+// CodeEditor НИКОГДА не уничтожается и не пересоздаётся при смене вкладки.
+// Это устраняет stale _CodeEditableState listener crash из re_editor.
+
+/// Контроллер всплывающей панели выделения (Selection Toolbar).
+/// Решает проблему зависания и дублирования контекстного меню "Копировать/Вставить":
+/// 1. Гарантирует синглтон оверлея — в любой момент времени существует максимум 1 тулбар на весь экран.
+/// 2. Оборачивает меню в TapRegion: тап в любое место за пределами тулбара мгновенно скрывает его.
+/// 3. Реагирует на смену видимости selectionOverlayController и скрывается при снятии выделения.
+class QuantumSelectionToolbarController implements SelectionToolbarController {
+  final ToolbarMenuBuilder builder;
+  static OverlayEntry? _activeEntry;
+  static VoidCallback? _activeVisibilityListener;
+  static ValueNotifier<bool>? _activeVisibility;
+
+  QuantumSelectionToolbarController({required this.builder});
+
+  static void dismissAll() {
+    if (_activeVisibility != null && _activeVisibilityListener != null) {
+      try {
+        _activeVisibility!.removeListener(_activeVisibilityListener!);
+      } catch (_) {}
+      _activeVisibility = null;
+      _activeVisibilityListener = null;
+    }
+    if (_activeEntry != null) {
+      try {
+        _activeEntry?.remove();
+      } catch (_) {}
+      _activeEntry = null;
+    }
+  }
+
+  @override
+  void hide(BuildContext context) {
+    dismissAll();
+  }
+
+  @override
+  void show({
+    required BuildContext context,
+    required CodeLineEditingController controller,
+    required TextSelectionToolbarAnchors anchors,
+    Rect? renderRect,
+    required LayerLink layerLink,
+    required ValueNotifier<bool> visibility,
+  }) {
+    dismissAll();
+
+    final OverlayState? overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+
+    void onVisibilityChanged() {
+      if (!visibility.value) {
+        Future.microtask(() => dismissAll());
+      }
+    }
+
+    visibility.addListener(onVisibilityChanged);
+    _activeVisibility = visibility;
+    _activeVisibilityListener = onVisibilityChanged;
+
+    final entry = OverlayEntry(
+      builder: (entryContext) {
+        return CodeEditorTapRegion(
+          child: Directionality(
+            textDirection: Directionality.of(context),
+            child: ValueListenableBuilder<bool>(
+              valueListenable: visibility,
+              builder: (ctx, isVisible, child) {
+                if (!isVisible) return const SizedBox.shrink();
+                return CompositedTransformFollower(
+                  link: layerLink,
+                  showWhenUnlinked: false,
+                  offset: renderRect != null
+                      ? -renderRect.topLeft
+                      : Offset.zero,
+                  child: CodeEditorTapRegion(
+                    child: builder(
+                      context: context,
+                      anchors: anchors,
+                      controller: controller,
+                      onDismiss: () => dismissAll(),
+                      onRefresh: () {
+                        dismissAll();
+                        show(
+                          context: context,
+                          controller: controller,
+                          anchors: anchors,
+                          renderRect: renderRect,
+                          layerLink: layerLink,
+                          visibility: visibility,
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+
+    overlay.insert(entry);
+    _activeEntry = entry;
+  }
+}
+
+class StableEditorWidget extends ConsumerStatefulWidget {
+  final EditorFile file;
+  final SettingsState settings;
+
+  const StableEditorWidget({
+    super.key,
+    required this.file,
+    required this.settings,
+  });
+
+  @override
+  ConsumerState<StableEditorWidget> createState() => StableEditorWidgetState();
+}
+
+class StableEditorWidgetState extends ConsumerState<StableEditorWidget>
+    with WidgetsBindingObserver {
+  late List<CodeDiagnostic> _diagnostics;
+  late List<DiffMarker> _diffMarkers;
+  late final CodeFindController _findController;
+  late final SelectionToolbarController _toolbarController;
+  StateController<CodeFindController?>? _activeFindNotifier;
+
+  final Map<int, Offset> _pinchPointers = {};
+  double _pinchInitialDistance = 0.0;
+  double _pinchInitialFontSize = 14.0;
+  Timer? _aiCompletionTimer;
+  String? _aiSuggestion;
+  String _lastAiText = '';
+
+  static final Map<String, String> _fontCache = {};
+  static const int _autoCloseMaxLines = 500;
+
+  String _getFontFamily(String fontName) {
+    if (fontName == 'Monospace') return 'monospace';
+    if (_fontCache.containsKey(fontName)) return _fontCache[fontName]!;
+    try {
+      final family = GoogleFonts.getFont(fontName).fontFamily ?? 'monospace';
+      _fontCache[fontName] = family;
+      return family;
+    } catch (_) {
+      return 'monospace';
+    }
+  }
+
+  // Cached syntax highlight themes map
+  static final Map<String, CodeHighlightTheme> _cachedThemes = {};
+
+  static CodeHighlightTheme _getHighlightTheme(String themeId) {
+    if (_cachedThemes.containsKey(themeId)) {
+      return _cachedThemes[themeId]!;
+    }
+
+    Map<String, TextStyle> styleMap;
+    switch (themeId) {
+      case 'atom-one-dark':
+        styleMap = atomOneDarkTheme;
+        break;
+      case 'tokyo-night':
+        styleMap = tokyoNightDarkTheme;
+        break;
+      case 'dracula':
+        styleMap = draculaTheme;
+        break;
+      case 'catppuccin':
+        styleMap = catppuccinMochaTheme;
+        break;
+      case 'aurora-neon':
+        styleMap = auroraNeonTheme;
+        break;
+      case 'night-owl':
+        styleMap = nightOwlTheme;
+        break;
+      case 'github-dark':
+        styleMap = githubDarkTheme;
+        break;
+      case 'github-dark-dimmed':
+        styleMap = githubDarkDimmedTheme;
+        break;
+      case 'nord':
+        styleMap = nordTheme;
+        break;
+      case 'monokai':
+        styleMap = monokaiTheme;
+        break;
+      case 'android-studio':
+        styleMap = androidstudioTheme;
+        break;
+      case 'vs-dark':
+      default:
+        styleMap = vs2015Theme;
+        break;
+    }
+
+    final theme = CodeHighlightTheme(
+      languages: {
+        'dart': CodeHighlightThemeMode(mode: langDart),
+        'json': CodeHighlightThemeMode(mode: langJson),
+        'html': CodeHighlightThemeMode(mode: langXml),
+        'xml': CodeHighlightThemeMode(mode: langXml),
+        'js': CodeHighlightThemeMode(mode: langJavascript),
+        'javascript': CodeHighlightThemeMode(mode: langJavascript),
+        'yaml': CodeHighlightThemeMode(mode: langYaml),
+        'markdown': CodeHighlightThemeMode(mode: langMarkdown),
+        'py': CodeHighlightThemeMode(mode: langPython),
+        'python': CodeHighlightThemeMode(mode: langPython),
+        'cpp': CodeHighlightThemeMode(mode: langCpp),
+        'java': CodeHighlightThemeMode(mode: langJava),
+        'php': CodeHighlightThemeMode(mode: langPhp),
+      },
+      theme: styleMap,
+    );
+
+    _cachedThemes[themeId] = theme;
+    return theme;
+  }
+
+  CodeLineEditingValue? _previousValue;
+  bool _isAutoClosing = false;
+  late final CodeScrollController _scrollController;
+  double _lastBottomInset = 0;
+
+  void _setupControllerListener() {
+    _previousValue = widget.file.controller.value;
+    widget.file.controller.addListener(_handleControllerChange);
+  }
+
+  void _removeControllerListener() {
+    widget.file.controller.removeListener(_handleControllerChange);
+  }
+
+  void _handleControllerChange() {
+    if (mounted && _lastBottomInset > 0) {
+      final cur = widget.file.controller.value.selection;
+      final prev = _previousValue?.selection;
+      if (cur.extentIndex != prev?.extentIndex) {
+        _ensureCursorVisible(center: false);
+      }
+    }
+
+    if (_isAutoClosing) return;
+
+    final controller = widget.file.controller;
+    final currentValue = controller.value;
+    final previousValue = _previousValue;
+    _previousValue = currentValue;
+
+    if (previousValue == null) return;
+    if (currentValue.codeLines != previousValue.codeLines) {
+      _scheduleAiCompletion();
+    }
+
+    final currentSelection = currentValue.selection;
+    final previousSelection = previousValue.selection;
+
+    if (!currentSelection.isCollapsed || !previousSelection.isCollapsed) return;
+    if (currentSelection.extentIndex != previousSelection.extentIndex) return;
+    if (currentValue.codeLines.length > _autoCloseMaxLines) return;
+
+    final lineIndex = currentSelection.extentIndex;
+    if (lineIndex >= currentValue.codeLines.length ||
+        lineIndex >= previousValue.codeLines.length)
+      return;
+
+    final currentOffset = currentSelection.extentOffset;
+    final previousOffset = previousSelection.extentOffset;
+    final currentLineText = currentValue.codeLines[lineIndex].text;
+    final prevLineText = previousValue.codeLines[lineIndex].text;
+
+    // 1. Backspace matching pair on the same line (O(1))
+    if (currentLineText.length == prevLineText.length - 1 &&
+        currentOffset == previousOffset - 1) {
+      if (currentOffset >= 0 &&
+          currentOffset < currentLineText.length &&
+          previousOffset > 0 &&
+          previousOffset <= prevLineText.length) {
+        final deletedChar = prevLineText[currentOffset];
+        if (currentOffset + 1 < prevLineText.length) {
+          final nextCharInPrev = prevLineText[currentOffset + 1];
+
+          bool isPair = false;
+          if ((deletedChar == '(' && nextCharInPrev == ')') ||
+              (deletedChar == '{' && nextCharInPrev == '}') ||
+              (deletedChar == '[' && nextCharInPrev == ']') ||
+              (deletedChar == '"' && nextCharInPrev == '"') ||
+              (deletedChar == "'" && nextCharInPrev == "'") ||
+              (deletedChar == '`' && nextCharInPrev == '`')) {
+            isPair = true;
+          }
+
+          if (isPair &&
+              currentOffset < currentLineText.length &&
+              currentLineText[currentOffset] == nextCharInPrev) {
+            _isAutoClosing = true;
+
+            final newLineText =
+                currentLineText.substring(0, currentOffset) +
+                currentLineText.substring(currentOffset + 1);
+
+            final newLines = List<CodeLine>.generate(
+              currentValue.codeLines.length,
+              (i) {
+                if (i == lineIndex) return CodeLine(newLineText);
+                return currentValue.codeLines[i];
+              },
+            );
+
+            controller.value = CodeLineEditingValue(
+              codeLines: CodeLines.of(newLines),
+              selection: currentSelection,
+            );
+
+            _previousValue = controller.value;
+            _isAutoClosing = false;
+            return;
+          }
+        }
+      }
+    }
+
+    // 2. Typing characters on the same line (O(1))
+    if (currentLineText.length == prevLineText.length + 1 &&
+        currentOffset == previousOffset + 1) {
+      if (currentOffset <= 0 || currentOffset > currentLineText.length) return;
+
+      final typedChar = currentLineText[currentOffset - 1];
+
+      // Step over closing character (overtype prevention)
+      if (typedChar == ')' ||
+          typedChar == '}' ||
+          typedChar == ']' ||
+          typedChar == '"' ||
+          typedChar == "'" ||
+          typedChar == '`') {
+        if (previousOffset < prevLineText.length &&
+            prevLineText[previousOffset] == typedChar) {
+          _isAutoClosing = true;
+
+          controller.value = previousValue.copyWith(
+            selection: currentSelection,
+          );
+
+          _previousValue = controller.value;
+          _isAutoClosing = false;
+          return;
+        }
+      }
+
+      // Auto-close opening character
+      String? closingChar;
+      switch (typedChar) {
+        case '(':
+          closingChar = ')';
+          break;
+        case '{':
+          closingChar = '}';
+          break;
+        case '[':
+          closingChar = ']';
+          break;
+        case '"':
+          closingChar = '"';
+          break;
+        case "'":
+          closingChar = "'";
+          break;
+        case '`':
+          closingChar = '`';
+          break;
+      }
+
+      if (closingChar != null) {
+        // Don't auto-close quotes if the next character is already a letter, number, or quote
+        if ((typedChar == '"' || typedChar == "'" || typedChar == '`') &&
+            currentOffset < currentLineText.length) {
+          final nextChar = currentLineText[currentOffset];
+          final RegExp wordChar = RegExp(r'[a-zA-Z0-9_]');
+          if (wordChar.hasMatch(nextChar) ||
+              nextChar == "'" ||
+              nextChar == '"' ||
+              nextChar == '`') {
+            return;
+          }
+        }
+
+        _isAutoClosing = true;
+
+        final newLineText =
+            currentLineText.substring(0, currentOffset) +
+            closingChar +
+            currentLineText.substring(currentOffset);
+
+        final newLines = List<CodeLine>.generate(
+          currentValue.codeLines.length,
+          (i) {
+            if (i == lineIndex) return CodeLine(newLineText);
+            return currentValue.codeLines[i];
+          },
+        );
+
+        controller.value = CodeLineEditingValue(
+          codeLines: CodeLines.of(newLines),
+          selection: currentSelection,
+        );
+
+        _previousValue = controller.value;
+        _isAutoClosing = false;
+      }
+    }
+  }
+
+  double _readLogicalBottomInset() {
+    final view = View.maybeOf(context);
+    if (view == null || view.devicePixelRatio <= 0) return 0.0;
+    return view.viewInsets.bottom / view.devicePixelRatio;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scrollController = CodeScrollController();
+    _diagnostics = widget.file.diagnostics;
+    _diffMarkers = widget.file.diffMarkers;
+    _findController = CodeFindController(widget.file.controller);
+    _toolbarController = QuantumSelectionToolbarController(
+      builder: _buildToolbarMenu,
+    );
+    _setupControllerListener();
+    _activeFindNotifier = ref.read(activeFindControllerProvider.notifier);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _activeFindNotifier?.state = _findController;
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lastBottomInset = _readLogicalBottomInset();
+  }
+
+  @override
+  void didChangeMetrics() {
+    final bottomInset = _readLogicalBottomInset();
+    if (bottomInset > 0 && _lastBottomInset == 0) {
+      // Клавиатура только что открылась: центрируем активную строку над клавиатурой
+      _ensureCursorVisible(center: true);
+    }
+    _lastBottomInset = bottomInset;
+  }
+
+  void _ensureCursorVisible({bool center = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        final position = widget.file.controller.selection.extent;
+        if (center) {
+          _scrollController.makeCenterIfInvisible(position);
+        } else {
+          _scrollController.makeVisible(position);
+        }
+      } catch (_) {}
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _aiCompletionTimer?.cancel();
+    QuantumSelectionToolbarController.dismissAll();
+    _removeControllerListener();
+    final findNotifier = _activeFindNotifier;
+    if (findNotifier != null && findNotifier.mounted && findNotifier.state == _findController) {
+      findNotifier.state = null;
+    }
+    _findController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(StableEditorWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.file.path != oldWidget.file.path) {
+      QuantumSelectionToolbarController.dismissAll();
+      _aiCompletionTimer?.cancel();
+      if (_aiSuggestion != null) {
+        setState(() => _aiSuggestion = null);
+      }
+    }
+    // Обновляем только диагностику и маркеры — не пересоздаём CodeEditor
+    if (widget.file.diagnostics != oldWidget.file.diagnostics ||
+        widget.file.diffMarkers != oldWidget.file.diffMarkers) {
+      setState(() {
+        _diagnostics = widget.file.diagnostics;
+        _diffMarkers = widget.file.diffMarkers;
+      });
+    }
+  }
+
+  void _scheduleAiCompletion() {
+    _aiCompletionTimer?.cancel();
+    if (_aiSuggestion != null) {
+      setState(() => _aiSuggestion = null);
+    }
+    if (!widget.settings.aiAutoCompletion ||
+        widget.settings.useCodeCrafterEditor) {
+      return;
+    }
+
+    final controller = widget.file.controller;
+    if (controller.codeLines.isEmpty) return;
+
+    _aiCompletionTimer = Timer(const Duration(milliseconds: 1100), () async {
+      if (!mounted) return;
+      final latestText = controller.text;
+      if (latestText.trim().length < 8 || latestText == _lastAiText) return;
+      _lastAiText = latestText;
+
+      final sel = controller.selection;
+      int offset = 0;
+      for (
+        int i = 0;
+        i < sel.extentIndex && i < controller.codeLines.length;
+        i++
+      ) {
+        offset += controller.codeLines[i].text.length + 1;
+      }
+      offset += sel.extentOffset;
+
+      final suggestion = await CodeCrafterAiService.completeAtCursor(
+        text: latestText,
+        cursorOffset: offset,
+        settings: widget.settings,
+        filePath: widget.file.path,
+      );
+      if (!mounted) return;
+      if (suggestion != null &&
+          suggestion.isNotEmpty &&
+          controller.text == latestText) {
+        setState(() => _aiSuggestion = suggestion);
+      }
+    });
+  }
+
+  void _acceptAiSuggestion() {
+    final suggestion = _aiSuggestion;
+    if (suggestion == null || suggestion.isEmpty) return;
+    widget.file.controller.replaceSelection(suggestion);
+    setState(() => _aiSuggestion = null);
+  }
+
+  String _getSelectedText() {
+    final controller = widget.file.controller;
+    if (controller.selectedText.isNotEmpty) {
+      return controller.selectedText;
+    }
+    final selection = controller.selection;
+    if (selection.isCollapsed) return '';
+    final lines = controller.codeLines;
+    if (lines.isEmpty) return '';
+
+    int startLine = selection.start.index;
+    int startCol = selection.start.offset;
+    int endLine = selection.end.index;
+    int endCol = selection.end.offset;
+
+    if (startLine > endLine || (startLine == endLine && startCol > endCol)) {
+      final tL = startLine;
+      final tC = startCol;
+      startLine = endLine;
+      startCol = endCol;
+      endLine = tL;
+      endCol = tC;
+    }
+
+    if (startLine < 0 || startLine >= lines.length) return '';
+    if (endLine < 0 || endLine >= lines.length) return '';
+
+    if (startLine == endLine) {
+      final lineText = lines[startLine].text;
+      final s = startCol.clamp(0, lineText.length);
+      final e = endCol.clamp(0, lineText.length);
+      if (s > e) return lineText.substring(e, s);
+      return lineText.substring(s, e);
+    }
+
+    final buffer = StringBuffer();
+    final firstLine = lines[startLine].text;
+    buffer.writeln(firstLine.substring(startCol.clamp(0, firstLine.length)));
+
+    for (int i = startLine + 1; i < endLine; i++) {
+      buffer.writeln(lines[i].text);
+    }
+
+    final lastLine = lines[endLine].text;
+    buffer.write(lastLine.substring(0, endCol.clamp(0, lastLine.length)));
+    return buffer.toString();
+  }
+
+  void _showDesktopContextMenu(BuildContext context, Offset position) {
+    final selectedText = _getSelectedText();
+    final hasSelection = selectedText.isNotEmpty;
+    final l10n = AppLocalizations.of(context)!;
+    final controller = widget.file.controller;
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      color: const Color(0xFF1E2230),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      items: [
+        if (hasSelection) ...[
+          PopupMenuItem(
+            value: 'cut',
+            child: Row(
+              children: [
+                const Icon(
+                  LucideIcons.scissors,
+                  size: 14,
+                  color: Colors.white70,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  l10n.cut,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'copy',
+            child: Row(
+              children: [
+                const Icon(LucideIcons.copy, size: 14, color: Colors.white70),
+                const SizedBox(width: 8),
+                Text(
+                  l10n.copy,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+        PopupMenuItem(
+          value: 'paste',
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.clipboard,
+                size: 14,
+                color: Colors.white70,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.paste,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'selectAll',
+          child: Row(
+            children: [
+              const Icon(LucideIcons.square, size: 14, color: Colors.white70),
+              const SizedBox(width: 8),
+              Text(
+                l10n.selectAll,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'goToDefinition',
+          child: Row(
+            children: [
+              const Icon(
+                LucideIcons.arrow_right,
+                size: 14,
+                color: Colors.white70,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.goToDefinition,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'findUsages',
+          child: Row(
+            children: [
+              const Icon(LucideIcons.search, size: 14, color: Colors.white70),
+              const SizedBox(width: 8),
+              Text(
+                l10n.usages,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'rename',
+          child: Row(
+            children: [
+              const Icon(LucideIcons.pencil, size: 14, color: Colors.white70),
+              const SizedBox(width: 8),
+              Text(
+                l10n.rename,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'format',
+          child: Row(
+            children: [
+              const Icon(LucideIcons.code, size: 14, color: Colors.white70),
+              const SizedBox(width: 8),
+              Text(
+                l10n.format,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == null || !context.mounted) return;
+
+      switch (value) {
+        case 'cut':
+          final cutText = _getSelectedText();
+          if (cutText.isNotEmpty) {
+            Clipboard.setData(ClipboardData(text: cutText));
+            controller.replaceSelection('');
+          }
+          try {
+            controller.cut();
+          } catch (_) {}
+          break;
+        case 'copy':
+          final copyText = _getSelectedText();
+          if (copyText.isNotEmpty) {
+            Clipboard.setData(ClipboardData(text: copyText));
+          } else {
+            final lineIdx = controller.selection.extentIndex;
+            if (lineIdx >= 0 && lineIdx < controller.codeLines.length) {
+              Clipboard.setData(
+                ClipboardData(text: controller.codeLines[lineIdx].text),
+              );
+            }
+          }
+          try {
+            controller.copy();
+          } catch (_) {}
+          break;
+        case 'paste':
+          Clipboard.getData(Clipboard.kTextPlain).then((data) {
+            if (data?.text != null && data!.text!.isNotEmpty) {
+              controller.replaceSelection(data.text!);
+            } else {
+              try {
+                controller.paste();
+              } catch (_) {}
+            }
+          });
+          break;
+        case 'selectAll':
+          if (controller.codeLines.isNotEmpty) {
+            final lastIdx = controller.codeLines.length - 1;
+            final lastLen = controller.codeLines[lastIdx].text.length;
+            controller.selection = CodeLineSelection(
+              baseIndex: 0,
+              baseOffset: 0,
+              extentIndex: lastIdx,
+              extentOffset: lastLen,
+            );
+          }
+          try {
+            controller.selectAll();
+          } catch (_) {}
+          break;
+        case 'goToDefinition':
+          ref.read(editorProvider.notifier).goToDefinition();
+          break;
+        case 'findUsages':
+          _findUsages(context);
+          break;
+        case 'rename':
+          _renameSymbol(context);
+          break;
+        case 'format':
+          ref.read(editorProvider.notifier).formatActiveFile();
+          break;
+      }
+    });
+  }
+
+  void _findUsages(BuildContext context) async {
+    final locations = await ref.read(editorProvider.notifier).getReferences();
+    if (locations.isNotEmpty && context.mounted) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF1E2230),
+        builder: (context) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                AppLocalizations.of(context)!.usages,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: ListView.builder(
+                itemCount: locations.length,
+                itemBuilder: (context, index) {
+                  final loc = locations[index];
+                  final fileName = p.basename(Uri.parse(loc.uri).toFilePath());
+                  return ListTile(
+                    title: Text(
+                      fileName,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Line ${loc.range.start.line + 1}, Column ${loc.range.start.character + 1}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      ref
+                          .read(editorProvider.notifier)
+                          .openFile(
+                            Uri.parse(loc.uri).toFilePath(),
+                            line: loc.range.start.line,
+                            column: loc.range.start.character,
+                          );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _renameSymbol(BuildContext context) async {
+    final controller = TextEditingController();
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2230),
+        title: Text(
+          AppLocalizations.of(context)!.rename,
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: AppLocalizations.of(context)!.rename,
+            hintStyle: const TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppLocalizations.of(context)!.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: Text(AppLocalizations.of(context)!.ok),
+          ),
+        ],
+      ),
+    );
+    if (newName != null && newName.isNotEmpty) {
+      ref.read(editorProvider.notifier).rename(newName);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = widget.settings;
+    final file = widget.file;
+
+    if (file.isImage) {
+      const sizeKb = '—';
+
+      return Container(
+        color: const Color(0xFF0F111A), // Sleek deep dark background
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161925),
+                        border: Border.all(color: Colors.white10),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: InteractiveViewer(
+                        maxScale: 5.0,
+                        child: Center(
+                          child: Hero(
+                            tag: file.path,
+                            child: Image.file(
+                              File(file.path),
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(
+                                        LucideIcons.image_off,
+                                        color: Colors.redAccent,
+                                        size: 48,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        AppLocalizations.of(
+                                          context,
+                                        )!.imageLoadError,
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Info panel
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF161925),
+                border: Border(top: BorderSide(color: Colors.white10)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          file.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          file.path,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 12,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: const Text(
+                      '$sizeKb KB',
+                      style: TextStyle(
+                        color: Colors.cyanAccent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final performanceService = ref.read(editorPerformanceServiceProvider);
+    final applyHighlighting = performanceService.shouldApplySyntaxHighlighting(
+      file.controller,
+    );
+    if (performanceService.isLargeFile(file.controller)) {
+      performanceService.optimizeForLargeFile(file.controller);
+    }
+
+    Widget editorWidget = settings.useCodeCrafterEditor
+        ? CodeCrafterEditorWrapper(file: file)
+        : CodeEditor(
+      controller: file.controller,
+      scrollController: _scrollController,
+      wordWrap: settings.wordWrap,
+      chunkAnalyzer: const DefaultCodeChunkAnalyzer(),
+      findController: _findController,
+      findBuilder: (context, controller, readOnly) =>
+          CodeFindPanelView(controller: controller, readOnly: readOnly),
+      toolbarController: _toolbarController,
+      indicatorBuilder: (context, controller, chunkController, notifier) {
+        final gutterPalette = settings.syncAppWithTerminalPalette
+            ? resolveConduitPalette(settings.terminalTheme)
+            : null;
+        return Container(
+          decoration: BoxDecoration(
+            color: gutterPalette?.panel ?? const Color(0xFF07090E),
+            border: Border(
+              right: BorderSide(
+                color: gutterPalette?.border ?? const Color(0xFF1E293B),
+                width: 1.0,
+              ),
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: DiffBackgroundPainter(
+                      notifier: notifier,
+                      markers: _diffMarkers,
+                    ),
+                    size: Size.zero,
+                  ),
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (settings.lineNumbers) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, right: 2),
+                      child: DefaultCodeLineNumber(
+                        controller: controller,
+                        notifier: notifier,
+                        textStyle: TextStyle(
+                          color: gutterPalette?.mutedForeground ??
+                              const Color(0xFF64748B),
+                          fontSize: (settings.fontSize * 0.88).clamp(11.0, 20.0),
+                          fontFamily: _getFontFamily(settings.editorFontFamily),
+                          fontWeight: FontWeight.w500,
+                        ),
+                        focusedTextStyle: TextStyle(
+                          color: gutterPalette?.accent ?? const Color(0xFF38BDF8),
+                          fontWeight: FontWeight.bold,
+                          fontSize: (settings.fontSize * 0.88).clamp(11.0, 20.0),
+                          fontFamily: _getFontFamily(settings.editorFontFamily),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                  ],
+                  DefaultCodeChunkIndicator(
+                    width: 12,
+                    controller: chunkController,
+                    notifier: notifier,
+                    painter: DefaultCodeChunkIndicatorPainter(
+                      color: (gutterPalette?.accent ?? Colors.cyanAccent)
+                          .withValues(alpha: 0.65),
+                      size: const Size(8, 8),
+                    ),
+                  ),
+                ],
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DiagnosticIndicator(
+                    diagnostics: _diagnostics,
+                    notifier: notifier,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 4,
+                child: IgnorePointer(
+                  child: DiffGutterIndicator(
+                    controller: controller,
+                    markers: _diffMarkers,
+                    notifier: notifier,
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: CollaborationPainter(
+                      notifier: notifier,
+                      filePath: file.path,
+                      ref: ref,
+                    ),
+                    size: Size.zero,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      style: CodeEditorStyle(
+        fontSize: settings.fontSize,
+        fontFamily: _getFontFamily(settings.editorFontFamily),
+        fontHeight: 1.38,
+        cursorColor: settings.syncAppWithTerminalPalette
+            ? resolveConduitPalette(settings.terminalTheme).accent
+            : Colors.cyanAccent,
+        cursorWidth: 2.2,
+        cursorLineColor: (settings.syncAppWithTerminalPalette
+                ? resolveConduitPalette(settings.terminalTheme).panel
+                : const Color(0xFF161C2C))
+            .withValues(alpha: 0.48),
+        selectionColor: (settings.syncAppWithTerminalPalette
+                ? resolveConduitPalette(settings.terminalTheme).accent
+                : Colors.cyanAccent)
+            .withValues(alpha: 0.26),
+        chunkIndicatorColor: (settings.syncAppWithTerminalPalette
+                ? resolveConduitPalette(settings.terminalTheme).accent
+                : Colors.cyanAccent)
+            .withValues(alpha: 0.5),
+        backgroundColor: settings.syncAppWithTerminalPalette
+            ? resolveConduitPalette(settings.terminalTheme).canvas
+            : const Color(0xFF090B12),
+        codeTheme: applyHighlighting
+            ? _getHighlightTheme(settings.editorTheme)
+            : null,
+      ),
+    );
+
+    editorWidget = RepaintBoundary(
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollStartNotification ||
+              notification is ScrollUpdateNotification) {
+            QuantumSelectionToolbarController.dismissAll();
+          }
+          return false;
+        },
+        child: editorWidget,
+      ),
+    );
+
+    if (settings.minimap) {
+      editorWidget = Row(
+        children: [
+          Expanded(child: editorWidget),
+          EditorMinimap(controller: file.controller, width: 70),
+        ],
+      );
+    }
+
+    return Listener(
+      onPointerDown: (e) {
+        _pinchPointers[e.pointer] = e.position;
+        if (_pinchPointers.length == 2) {
+          final pts = _pinchPointers.values.toList();
+          _pinchInitialDistance = (pts[0] - pts[1]).distance;
+          _pinchInitialFontSize = widget.settings.fontSize;
+        }
+      },
+      onPointerMove: (e) {
+        _pinchPointers[e.pointer] = e.position;
+        if (_pinchPointers.length == 2 && _pinchInitialDistance > 10) {
+          final pts = _pinchPointers.values.toList();
+          final currentDist = (pts[0] - pts[1]).distance;
+          final scale = currentDist / _pinchInitialDistance;
+          final target = (_pinchInitialFontSize * scale).clamp(11.0, 32.0);
+          final rounded = (target * 2).round() / 2.0;
+          if ((rounded - widget.settings.fontSize).abs() >= 0.5) {
+            ref.read(settingsProvider.notifier).setFontSize(rounded);
+          }
+        }
+      },
+      onPointerUp: (e) {
+        _pinchPointers.remove(e.pointer);
+        if (widget.settings.hardwareKeyboardMode) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            SystemChannels.textInput.invokeMethod('TextInput.hide');
+          });
+        }
+      },
+      onPointerCancel: (e) {
+        _pinchPointers.remove(e.pointer);
+      },
+      onPointerSignal: (e) {
+        if (e is PointerScrollEvent &&
+            HardwareKeyboard.instance.isControlPressed) {
+          final delta = e.scrollDelta.dy < 0 ? 1.0 : -1.0;
+          final newSize = (widget.settings.fontSize + delta).clamp(11.0, 32.0);
+          ref.read(settingsProvider.notifier).setFontSize(newSize);
+        }
+      },
+      child: Stack(
+        children: [
+          GestureDetector(
+            onSecondaryTapDown: (details) {
+              _showDesktopContextMenu(context, details.globalPosition);
+            },
+            child: editorWidget,
+          ),
+          if (_aiSuggestion != null)
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 340, maxHeight: 160),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.96),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFF38BDF8).withValues(alpha: 0.45),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            LucideIcons.sparkles,
+                            size: 13,
+                            color: Color(0xFF38BDF8),
+                          ),
+                          const SizedBox(width: 6),
+                          const Expanded(
+                            child: Text(
+                              'CodeCrafter AI',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF38BDF8),
+                              ),
+                            ),
+                          ),
+                          InkWell(
+                            onTap: _acceptAiSuggestion,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF38BDF8).withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Вставить',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF38BDF8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: () => setState(() => _aiSuggestion = null),
+                            child: const Icon(
+                              LucideIcons.x,
+                              size: 14,
+                              color: Color(0xFF94A3B8),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: Text(
+                            _aiSuggestion!,
+                            style: TextStyle(
+                              fontFamily: _getFontFamily(
+                                widget.settings.editorFontFamily,
+                              ),
+                              fontSize: 11.5,
+                              color: const Color(0xFFE2E8F0),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolbarMenu({
+    required BuildContext context,
+    required TextSelectionToolbarAnchors anchors,
+    required CodeLineEditingController controller,
+    required VoidCallback onDismiss,
+    required VoidCallback onRefresh,
+  }) {
+    final List<ContextMenuButtonItem> buttonItems = [];
+    final l10n = AppLocalizations.of(context)!;
+
+    if (!controller.selection.isCollapsed ||
+        controller.selectedText.isNotEmpty) {
+      buttonItems.add(
+        ContextMenuButtonItem(
+          label: l10n.cut,
+          onPressed: () async {
+            final text = controller.selectedText.isNotEmpty
+                ? controller.selectedText
+                : _getSelectedText();
+            if (text.isNotEmpty) {
+              await Clipboard.setData(ClipboardData(text: text));
+              controller.replaceSelection('');
+            }
+            try {
+              controller.cut();
+            } catch (_) {}
+            onDismiss();
+          },
+        ),
+      );
+      buttonItems.add(
+        ContextMenuButtonItem(
+          label: l10n.copy,
+          onPressed: () async {
+            final text = controller.selectedText.isNotEmpty
+                ? controller.selectedText
+                : _getSelectedText();
+            if (text.isNotEmpty) {
+              await Clipboard.setData(ClipboardData(text: text));
+            } else {
+              final lineIdx = controller.selection.extentIndex;
+              if (lineIdx >= 0 && lineIdx < controller.codeLines.length) {
+                await Clipboard.setData(
+                  ClipboardData(text: controller.codeLines[lineIdx].text),
+                );
+              }
+            }
+            try {
+              controller.copy();
+            } catch (_) {}
+            onDismiss();
+          },
+        ),
+      );
+    }
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.paste,
+        onPressed: () async {
+          final data = await Clipboard.getData(Clipboard.kTextPlain);
+          if (data?.text != null && data!.text!.isNotEmpty) {
+            controller.replaceSelection(data.text!);
+          } else {
+            try {
+              controller.paste();
+            } catch (_) {}
+          }
+          onDismiss();
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.selectAll,
+        onPressed: () {
+          if (controller.codeLines.isNotEmpty) {
+            final lastIdx = controller.codeLines.length - 1;
+            final lastLen = controller.codeLines[lastIdx].text.length;
+            controller.selection = CodeLineSelection(
+              baseIndex: 0,
+              baseOffset: 0,
+              extentIndex: lastIdx,
+              extentOffset: lastLen,
+            );
+          }
+          try {
+            controller.selectAll();
+          } catch (_) {}
+          onRefresh();
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.goToDefinition,
+        onPressed: () {
+          onDismiss();
+          ref.read(editorProvider.notifier).goToDefinition();
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.search,
+        onPressed: () {
+          onDismiss();
+          _findController.findMode();
+          _findController.focusOnFindInput();
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.info,
+        onPressed: () async {
+          onDismiss();
+          final hover = await ref.read(editorProvider.notifier).getHover();
+          if (hover != null && context.mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                backgroundColor: const Color(0xFF1E2230),
+                title: Text(
+                  l10n.documentation,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                ),
+                content: SingleChildScrollView(
+                  child: Text(
+                    hover.contents,
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l10n.ok),
+                  ),
+                ],
+              ),
+            );
+          }
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.usages,
+        onPressed: () async {
+          onDismiss();
+          final locations = await ref
+              .read(editorProvider.notifier)
+              .getReferences();
+          if (locations.isNotEmpty && context.mounted) {
+            showModalBottomSheet(
+              context: context,
+              backgroundColor: const Color(0xFF1E2230),
+              builder: (context) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(
+                      l10n.usages,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: locations.length,
+                      itemBuilder: (context, index) {
+                        final loc = locations[index];
+                        final fileName = p.basename(
+                          Uri.parse(loc.uri).toFilePath(),
+                        );
+                        return ListTile(
+                          title: Text(
+                            fileName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${l10n.line} ${loc.range.start.line + 1}, ${l10n.column} ${loc.range.start.character + 1}',
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.pop(context);
+                            ref
+                                .read(editorProvider.notifier)
+                                .openFile(
+                                  Uri.parse(loc.uri).toFilePath(),
+                                  line: loc.range.start.line,
+                                  column: loc.range.start.character,
+                                );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.rename,
+        onPressed: () async {
+          onDismiss();
+          final renameCtrl = TextEditingController();
+          final newName = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: const Color(0xFF1E2230),
+              title: Text(
+                l10n.rename,
+                style: const TextStyle(color: Colors.white),
+              ),
+              content: TextField(
+                controller: renameCtrl,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: l10n.rename,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.cancel),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, renameCtrl.text),
+                  child: Text(l10n.ok),
+                ),
+              ],
+            ),
+          );
+          if (newName != null && newName.isNotEmpty) {
+            ref.read(editorProvider.notifier).rename(newName);
+          }
+        },
+      ),
+    );
+
+    buttonItems.add(
+      ContextMenuButtonItem(
+        label: l10n.format,
+        onPressed: () {
+          onDismiss();
+          ref.read(editorProvider.notifier).formatActiveFile();
+        },
+      ),
+    );
+
+    return CodeEditorTapRegion(
+      child: AdaptiveTextSelectionToolbar.buttonItems(
+        anchors: anchors,
+        buttonItems: buttonItems,
+      ),
+    );
+  }
+}
+
+class ActionIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final String? tooltip;
+  final Color? color;
+  final Color? backgroundColor;
+  final Color? borderColor;
+  final double size;
+  final double iconSize;
+
+  const ActionIconButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.color,
+    this.backgroundColor,
+    this.borderColor,
+    this.size = 32,
+    this.iconSize = 15,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor = color ?? const Color(0xFF94A3B8);
+    final effectiveBg = backgroundColor ?? const Color(0xFF141720);
+    final effectiveBorder = borderColor ?? Colors.white.withValues(alpha: 0.08);
+
+    Widget button = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(7),
+        splashColor: Colors.white.withValues(alpha: 0.08),
+        highlightColor: Colors.white.withValues(alpha: 0.04),
+        child: Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: effectiveBg,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: effectiveBorder, width: 0.8),
+          ),
+          child: Icon(icon, size: iconSize, color: effectiveColor),
+        ),
+      ),
+    );
+
+    if (tooltip != null && tooltip!.isNotEmpty) {
+      button = Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 350),
+        child: button,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2.5),
+      child: button,
+    );
+  }
+}
+
+class QuantumAutocompleteView extends StatefulWidget
+    implements PreferredSizeWidget {
+  final ValueNotifier<CodeAutocompleteEditingValue> notifier;
+  final ValueChanged<CodeAutocompleteResult> onSelected;
+
+  const QuantumAutocompleteView({
+    super.key,
+    required this.notifier,
+    required this.onSelected,
+  });
+
+  @override
+  State<QuantumAutocompleteView> createState() =>
+      _QuantumAutocompleteViewState();
+
+  @override
+  Size get preferredSize => const Size(310, 190);
+}
+
+class _QuantumAutocompleteViewState extends State<QuantumAutocompleteView> {
+  double _dyCorrection = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkBoundary());
+  }
+
+  void _checkBoundary() {
+    if (!mounted) return;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+
+    final pos = box.localToGlobal(Offset.zero);
+    final keyboardTop =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom -
+        6.0;
+    final uncorrectedBottom = pos.dy + box.size.height - _dyCorrection;
+
+    double shift = 0.0;
+    if (uncorrectedBottom > keyboardTop) {
+      shift = -(uncorrectedBottom - keyboardTop + 6.0);
+    } else if (pos.dy - _dyCorrection < 64.0) {
+      shift = 64.0 - (pos.dy - _dyCorrection);
+    }
+
+    if ((_dyCorrection - shift).abs() > 1.5) {
+      setState(() => _dyCorrection = shift);
+    }
+  }
+
+  IconData _getPromptIcon(CodePrompt prompt) {
+    if (prompt is CodeSnippetPrompt) return LucideIcons.boxes;
+    if (prompt is LspCompletionPrompt) return LucideIcons.box;
+    if (prompt is CodeKeywordPrompt) return LucideIcons.key_round;
+    return LucideIcons.code;
+  }
+
+  Color _getPromptColor(CodePrompt prompt) {
+    if (prompt is CodeSnippetPrompt) return Colors.amberAccent;
+    if (prompt is LspCompletionPrompt) return Colors.cyanAccent;
+    if (prompt is CodeKeywordPrompt) return Colors.blueAccent;
+    return Colors.white70;
+  }
+
+  String _getPromptBadge(CodePrompt prompt) {
+    if (prompt is CodeSnippetPrompt) return 'сниппет';
+    if (prompt is LspCompletionPrompt) return 'LSP';
+    if (prompt is CodeKeywordPrompt) return 'ключ';
+    return 'слово';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final popupWidth = (screenWidth - 24.0).clamp(240.0, 310.0);
+    final maxPopupHeight = bottomInset > 0 ? 165.0 : 210.0;
+
+    return ValueListenableBuilder<CodeAutocompleteEditingValue>(
+      valueListenable: widget.notifier,
+      builder: (context, value, child) {
+        if (value.prompts.isEmpty) return const SizedBox();
+
+        WidgetsBinding.instance.addPostFrameCallback((_) => _checkBoundary());
+
+        return Transform.translate(
+          offset: Offset(0, _dyCorrection),
+          child: GlassContainer(
+            blur: 40,
+            opacity: 0.38,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Colors.cyanAccent.withValues(alpha: 0.35),
+              width: 0.8,
+            ),
+            child: Container(
+              width: popupWidth,
+              constraints: BoxConstraints(maxHeight: maxPopupHeight),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F121C).withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black87,
+                    blurRadius: 18,
+                    offset: Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.04),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(14),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          LucideIcons.sparkles,
+                          size: 10,
+                          color: Colors.cyanAccent,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'VS Code IntelliSense (${value.prompts.length})',
+                          style: GoogleFonts.inter(
+                            fontSize: 9.5,
+                            color: Colors.white54,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Tab / Нажмите',
+                          style: GoogleFonts.inter(
+                            fontSize: 8.5,
+                            color: Colors.white30,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: value.prompts.length,
+                      itemBuilder: (context, index) {
+                        final prompt = value.prompts[index];
+                        final isSelected = value.index == index;
+                        final icon = _getPromptIcon(prompt);
+                        final color = _getPromptColor(prompt);
+                        final badge = _getPromptBadge(prompt);
+
+                        return InkWell(
+                          onTap: () => widget.onSelected(
+                            value.copyWith(index: index).autocomplete,
+                          ),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 120),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? color.withValues(alpha: 0.18)
+                                  : Colors.transparent,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(3.5),
+                                  decoration: BoxDecoration(
+                                    color: color.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Icon(icon, size: 12, color: color),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    prompt.word,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.jetBrainsMono(
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontSize: 12.5,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1.5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: color.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: Text(
+                                    badge,
+                                    style: TextStyle(
+                                      color: color,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class FloatingCapsuleButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  const FloatingCapsuleButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF4CD7F6)),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 8,
+                color: Colors.white.withValues(alpha: 0.5),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
