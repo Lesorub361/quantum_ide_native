@@ -154,6 +154,103 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
     return '$prelude$adapted';
   }
 
+  /// Adapts Ubuntu/PRoot package commands to Native ARM64 Userspace (`pkg` + `$filesDir/usr`).
+  String _adaptCommandForNativeUserspace(
+    String command,
+    String filesDir,
+    String packageId,
+  ) {
+    final prefix = '$filesDir/usr';
+    final nativeTmp = '$filesDir/tmp';
+
+    const directPkgMap = <String, String>{
+      'python': 'python',
+      'python3': 'python',
+      'git': 'git ca-certificates',
+      'nodejs': 'nodejs',
+      'node': 'nodejs',
+      'java': 'openjdk-17',
+      'jdk17': 'openjdk-17',
+      'jdk21': 'openjdk-21',
+      'openjdk-17': 'openjdk-17',
+      'openjdk-21': 'openjdk-21',
+      'build-essential': 'clang make binutils pkg-config',
+      'clang': 'clang lld llvm',
+      'cmake': 'cmake ninja',
+      'rust': 'rust',
+      'go': 'golang',
+      'golang': 'golang',
+      'php': 'php',
+      'ruby': 'ruby',
+      'sqlite': 'sqlite',
+      'openssh': 'openssh',
+      'curl': 'curl',
+      'wget': 'wget',
+      'vim': 'vim',
+      'nano': 'nano',
+      'tmux': 'tmux',
+      'ripgrep': 'ripgrep',
+      'fd': 'fd',
+      'gradle': 'gradle',
+    };
+
+    final directPkg = directPkgMap[packageId.toLowerCase()];
+    if (directPkg != null) {
+      return 'export HOME="$filesDir" PREFIX="$prefix" TMPDIR="$nativeTmp" '
+          'PATH="$prefix/bin:$filesDir/bin:\$PATH"; '
+          'mkdir -p "$nativeTmp" "$prefix/bin" 2>/dev/null || true; '
+          '(pkg update || true) && pkg install $directPkg';
+    }
+
+    var adapted = command;
+    const lockMarker = 'ca-certificates 2>/dev/null || true ; ';
+    if (adapted.contains(lockMarker)) {
+      adapted = adapted.substring(adapted.indexOf(lockMarker) + lockMarker.length);
+    } else if (adapted.contains('kill -9 \$(pgrep')) {
+      final parts = adapted.split(' ; ');
+      adapted = parts
+          .where((part) =>
+              !part.contains('pgrep') &&
+              !part.contains('/var/lib/') &&
+              !part.contains('/var/cache/') &&
+              !part.contains('dpkg --configure') &&
+              !part.contains('dpkg --remove') &&
+              !part.contains('apt-get install -f') &&
+              !part.contains('export HOME=/root') &&
+              !part.contains('export USER=root'))
+          .join(' ; ');
+    }
+
+    adapted = adapted
+        .replaceAll('(/bin/bash /root/setup-arm64.sh 2>/dev/null || true)', 'true')
+        .replaceAll('/bin/bash /root/setup-arm64.sh', 'true')
+        .replaceAll('/root/setup-arm64.sh', 'true')
+        .replaceAll('/root/', '$filesDir/')
+        .replaceAll('/root', filesDir)
+        .replaceAll('/tmp/', '$nativeTmp/')
+        .replaceAll('/usr/local/bin/', '$prefix/bin/')
+        .replaceAll('/usr/local/bin', '$prefix/bin');
+
+    // Convert any embedded apt-get / apt install calls into native `pkg install`
+    adapted = adapted.replaceAllMapped(
+      RegExp(
+        r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+update(?:\s+-[a-zA-Z]+)*\s*&&\s*(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
+      ),
+      (m) => '(pkg update || true) && pkg install ${m.group(1)!.trim()}',
+    );
+    adapted = adapted.replaceAllMapped(
+      RegExp(
+        r'(?:DEBIAN_FRONTEND=noninteractive\s+)?(?:apt-get|apt)\s+install(?:\s+(?:--reinstall|--no-install-recommends|-y|-qq))*\s+([^;&|\n]+)',
+      ),
+      (m) => 'pkg install ${m.group(1)!.trim()}',
+    );
+
+    return 'export HOME="$filesDir" PREFIX="$prefix" TMPDIR="$nativeTmp" '
+        'PATH="$prefix/bin:$filesDir/bin:\$PATH"; '
+        'mkdir -p "$nativeTmp" "$prefix/bin" 2>/dev/null || true; '
+        '$adapted';
+  }
+
   Future<void> _startProcess() async {
     setState(() {
       _isRunning = true;
@@ -183,13 +280,13 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
       } else if (widget.package.id == 'flutter') {
         command = 'if [ -d /root/flutter/.git ]; then cd /root/flutter && git pull && /root/flutter/bin/flutter precache; else ${widget.package.command}; fi';
       } else if (widget.package.id == 'python') {
-        command = 'export HOME=/root ; export USER=root ; apt update && apt install --reinstall -y python3 python3-pip python-is-python3';
+        command = 'pkg update && pkg install python';
       } else if (widget.package.id == 'git') {
-        command = 'export HOME=/root ; export USER=root ; apt update && apt install --reinstall -y git ca-certificates';
+        command = 'pkg update && pkg install git ca-certificates';
       } else if (widget.package.id == 'nodejs') {
-        command = 'export HOME=/root ; export USER=root ; curl -4 -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y --reinstall nodejs';
+        command = 'pkg update && pkg install nodejs';
       } else if (widget.package.id == 'build-essential') {
-        command = 'export HOME=/root ; export USER=root ; apt update && apt install --reinstall -y build-essential';
+        command = 'pkg update && pkg install clang make binutils pkg-config';
       } else if (widget.package.id == 'uv') {
         command = 'uv self update || (curl -LsSf https://astral.sh/uv/install.sh | sh)';
       } else if (widget.package.id == 'bun') {
@@ -207,11 +304,20 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
     try {
       if (Platform.isAndroid || Platform.isIOS) {
         final isNativeRoot = Platform.isAndroid && runtime.useNativeRootMode;
+        final isNativeUserspace =
+            Platform.isAndroid && runtime.useNativeUserspaceMode;
         if (isNativeRoot) {
           command = _adaptCommandForNativeRoot(command, runtime.filesDir);
           _logs.add('📦 Окружение: Android Native Root Kernel (su)');
+        } else if (isNativeUserspace) {
+          command = _adaptCommandForNativeUserspace(
+            command,
+            runtime.filesDir,
+            widget.package.id,
+          );
+          _logs.add('📦 Окружение: Native ARM64 Userspace (pkg / Leostryx)');
         } else {
-          _logs.add('📦 Окружение: Android PRoot userspace');
+          _logs.add('📦 Окружение: Android userspace');
         }
         _logs.add('\$ $command\n');
 

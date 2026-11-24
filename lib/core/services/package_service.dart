@@ -34,9 +34,21 @@ class PackageService extends StateNotifier<List<OptionalPackage>> {
   }
 
   List<String> _getBinarySearchDirs() {
-    final home = Platform.environment['HOME'] ?? '/root';
+    final runtime = _ref.read(runtimeServiceProvider);
+    final filesDir = runtime.filesDir;
+    final prefix = runtime.nativeUserspacePrefix;
+    final home = Platform.isAndroid && filesDir.isNotEmpty
+        ? filesDir
+        : (Platform.environment['HOME'] ?? '/root');
     final pathEnv = Platform.environment['PATH'] ?? '';
     final dirs = <String>{
+      if (prefix.isNotEmpty) p.join(prefix, 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, 'flutter', 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, '.local', 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, '.cargo', 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, '.bun', 'bin'),
+      if (filesDir.isNotEmpty) p.join(filesDir, '.pub-cache', 'bin'),
       '/usr/local/bin',
       '/usr/bin',
       '/bin',
@@ -78,6 +90,11 @@ class PackageService extends StateNotifier<List<OptionalPackage>> {
   }
 
   Future<String> _getAndroidSdkPathAsync() async {
+    final runtime = _ref.read(runtimeServiceProvider);
+    if (Platform.isAndroid && runtime.filesDir.isNotEmpty) {
+      final nativeSdk = p.join(runtime.filesDir, 'android-sdk');
+      if (await _dirExistsSafe(nativeSdk)) return nativeSdk;
+    }
     if (await _dirExistsSafe('/root/android-sdk')) {
       return '/root/android-sdk';
     }
@@ -89,20 +106,11 @@ class PackageService extends StateNotifier<List<OptionalPackage>> {
     if (await _dirExistsSafe(userSdk)) {
       return userSdk;
     }
-    final runtime = _ref.read(runtimeServiceProvider);
-    if (Platform.isAndroid) {
-      final prootCandidates = [
-        if (runtime.filesDir.isNotEmpty) p.join(runtime.filesDir, 'rootfs', 'ubuntu', 'root', 'android-sdk'),
-        '/data/user/0/com.example.quantum_ide/files/rootfs/ubuntu/root/android-sdk',
-        '/data/data/com.example.quantum_ide/files/rootfs/ubuntu/root/android-sdk',
-      ];
-      for (final candidate in prootCandidates) {
-        if (await _dirExistsSafe(candidate)) return candidate;
-      }
-    }
     return Platform.environment['ANDROID_HOME'] ??
         Platform.environment['ANDROID_SDK_ROOT'] ??
-        p.join(home, 'android-sdk');
+        (Platform.isAndroid && runtime.filesDir.isNotEmpty
+            ? p.join(runtime.filesDir, 'android-sdk')
+            : p.join(home, 'android-sdk'));
   }
 
   String _translateCommandForPC(String cmd, {String packageId = ''}) {
