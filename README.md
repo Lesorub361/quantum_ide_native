@@ -1,73 +1,68 @@
 <div align="center">
 
-# ⚡ QuantumIDE
+# ⚡ QuantumIDE Native
 
-**Next-Gen AI-Powered Mobile & Desktop Studio built with Flutter**
+**Next-Gen AI-Powered Mobile & Desktop Studio built with Flutter — Native ARM64 Userspace Edition (без Ubuntu и без PRoot)**
 
-[![Build APK](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-apk.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-apk.yml)
-[![Build Linux](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-linux.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-linux.yml)
-[![Build Windows](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-windows.yml)
-[![Build macOS](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-macos.yml)
-[![Build iOS](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-ios.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-ios.yml)
-[![Build Web](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-web.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide/actions/workflows/build-web.yml)
+[![Build APK](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-apk.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-apk.yml)
+[![Build Linux](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-linux.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-linux.yml)
+[![Build Windows](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-windows.yml)
+[![Build macOS](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-macos.yml)
+[![Build iOS](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-ios.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-ios.yml)
+[![Build Web](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-web.yml/badge.svg)](https://github.com/Lesorub361/quantum_ide_native/actions/workflows/build-web.yml)
 
-**Основная ветка разработки:** `flutter-3.50` · **Релизы:** [`v1.2.240`](https://github.com/Lesorub361/quantum_ide/releases/latest)
+**Основная ветка:** `main` · **Релизы:** [`v1.0.0`](https://github.com/Lesorub361/quantum_ide_native/releases/latest) · **Package ID:** `com.example.quantum_ide_native`
 
 </div>
 
 ---
 
+## 🚀 Чем отличается QuantumIDE Native от обычного QuantumIDE
+
+Эта редакция полностью избавлена от тяжёлого контейнера **Ubuntu 24.04** и прослойки **PRoot** (`libproot.so`, `libtalloc.so` удалены из сборки):
+
+- **Чистый Native ARM64 Userspace (архитектура Leostryx)**: все команды и терминал работают напрямую на ядре Android в `$HOME/usr` (`$PREFIX`) без эмуляции системных вызовов PRoot.
+- **Лёгкий старт (~44 МБ вместо ~500+ МБ Ubuntu)**: при первом запуске скачивается только компактный ARM64 Bionic bootstrap.
+- **Встроенные нативные библиотеки `.so` из Leostryx**: `libtermux-exec.so`, `libquantum_loader.so`, `liblse_compat.so` + нативный запуск Bionic `bash` через `/system/bin/linker64` (совместимо с Android 10–16, `targetSdk 36`).
+- **Встроенный пакетный менеджер `pkg`**: установка пакетов (`pkg update`, `pkg install git python nodejs ...`) напрямую в нативное окружение без Root и без Ubuntu.
+- **Установка рядом с обычным QuantumIDE**: отдельный `applicationId` (`com.example.quantum_ide_native`) и имя **QuantumIDE Native** позволяют держать обе версии на одном устройстве одновременно.
+
+---
+
 ## 📱 Поддерживаемые устройства и платформы
 
-QuantumIDE собирается автоматически через GitHub Actions для всех основных мобильных, десктопных и веб-платформ:
+QuantumIDE Native собирается автоматически через GitHub Actions:
 
 | Платформа | Архитектура / Формат | Статус | Примечание |
 | :--- | :--- | :---: | :--- |
-| **Android** | `arm64-v8a`, `armeabi-v7a`, `x86_64`, Universal (`.apk` / `.aab`) | ✅ Полная поддержка | Встроенный Ubuntu 24.04 PRoot **или** работа напрямую на ядре устройства с Root-правами (`su`) без скачивания Ubuntu |
+| **Android** | `arm64-v8a` (`.apk` / `.aab`) | ✅ Полная поддержка | **Native ARM64 Userspace** (Leostryx `.so` + `pkg`, ~44 МБ, без Ubuntu и PRoot) или Root-режим (`su`) |
 | **Linux Desktop** | `x64`, `arm64` (`.tar.gz`) | ✅ Поддерживается | Открытие проектов на месте (in-place), автопоиск `flutter`/`agy`/SDK + нативный терминал |
 | **Windows Desktop** | `x64`, `arm64` (`.zip`) | ✅ Поддерживается | Открытие проектов на месте, выбор папки проекта, автопоиск SDK, AI-агент и Git |
 | **macOS** | Universal / Apple Silicon (`.zip`) | ✅ Поддерживается | Нативная работа с проектами, автопоиск Homebrew/Flutter SDK, AI-агент и Git |
 | **iOS** | Unsigned `.ipa` | 🧪 Экспериментально | Доступна сборка без подписи через CI |
 | **Web** | PWA / Static Web Bundle (`.tar.gz` / `.zip`) | ✅ Поддерживается | Веб-версия редактора и AI-ассистента |
 
-> 📥 **Скачать готовые сборки для всех устройств:** [GitHub Releases](https://github.com/Lesorub361/quantum_ide/releases/latest)
+> 📥 **Скачать готовые сборки:** [GitHub Releases](https://github.com/Lesorub361/quantum_ide_native/releases/latest)
 
 ---
 
-## ✨ Что уже реализовано в проекте
+## ✨ Что реализовано в проекте
 
-### 🤖 AI-агент профессионального уровня (Roxum Agent + Quantum AI + MCP)
-- **До 48 шагов автономного цикла + Smart Context Compaction**: агент не обрывается на полпути и автоматически сжимает старые результаты чтения/вывода в компактные резюме, экономя до 70% токенов.
-- **Визуальный таймлайн действий в стиле Antigravity**: живая карточка хода работы агента с цветными иконками языков (`Dart`, `JS/TS`, `Python`, `HTML`, `JSON`, `Bash`), бейджами диапазонов просматриваемых строк (`#L1-80`), статистикой изменений (`+N -M`), индикатором `Running...` и кликабельным переходом к нужной строке файла в редакторе.
-- **Автопоиск SDK и установка недостающих пакетов (`checkEnvironment` & `installPackages`)**: агент автоматически находит установленные в системе `flutter`, `dart`, `agy`, `node`, `npm`, `python3`, `cargo`, `go`, `java`, `adb`, `git` (включая `/persistent/home/...`, `~/.local/bin`, `/opt/flutter/bin`, `/snap/bin`) и сам устанавливает недостающие пакеты через `apt`, `pub`, `npm`, `pip` или `cargo`.
-- **Реальная проверка ошибок (`getLspDiagnostics` + `flutter analyze`)**: после генерации или правки кода агент запускает как встроенный LSP, так и `flutter analyze` / `dart analyze` / `tsc --noEmit` по всему проекту, чтобы увидеть и исправить все ошибки компиляции.
-- **4 встроенных нативных MCP-сервера (0 токенов на запуск, работают без Node/Python)**:
-  - `quantum-code-intel` — мгновенная структура символов файла (`outline_file`), пакетное чтение диапазонов строк и точный поиск по проекту.
-  - `quantum-git-ops` — быстрый статус, diff и лог репозитория.
-  - `quantum-pkg-manager` — проверка окружения и установка пакетов.
-  - `quantum-memory` — долговременная память архитектурных заметок проекта.
-- **CodeCrafter Editor & LSP Bridge (`flutter_code_crafter`)**: редактор кода с подсветкой синтаксиса для всех языков (`allLanguages`), фолдингом, брейкпоинтами, направляющими отступов, AI inline-дополнением и мостом к `LspService`.
-- **Мультипровайдерность**: Google Gemini, DeepSeek, OpenAI, Anthropic Claude, OpenRouter, Groq, xAI Grok, Mistral, а также локальные модели (Ollama / `llama.cpp` / Custom OpenAI-compatible API).
+### 🤖 AI-агент (Roxum Agent + MCP + Agent Skills)
+- **Официальный Dart & Flutter MCP Server (`dart mcp-server`)**: подключение в 1 клик (Dart Analysis Server, DTD, `pub.dev`, тесты, Agentic Hot Reload).
+- **Модульные Agent Skills (`RoxumSkillLoader`)**: динамическая подгрузка `.agents/skills/*/SKILL.md` и `.quantum/skills/*/SKILL.md` под конкретную задачу.
+- **Flutter Widget Previews (`@Preview`)**: кнопка предпросмотра виджетов прямо в тулбаре редактора `.dart`.
+- **Мультипровайдерность**: Google Gemini, DeepSeek, OpenAI, Anthropic Claude, OpenRouter, Groq, xAI Grok, Mistral и локальные OpenAI-совместимые серверы (Ollama / `llama.cpp`).
 
-### 💻 Терминал нового поколения (Conduit Engine) и Root-режим без скачивания Ubuntu
-- **Движок [`conduit_vt`](packages/conduit_vt)**: быстрый рендеринг VT-последовательностей, кликабельные ссылки (`Ctrl+клик` / одиночный тап по URL), автокопирование при выделении и **экранная лупа (magnifier)** на мобильных экранах.
-- **Режим Native Root Kernel (`su` без скачивания Ubuntu)**: если на Android-устройстве есть Root-права (**Magisk / KernelSU / APatch**), пользователь может включить работу **напрямую на своём ядре Linux/Android** без скачивания архива Ubuntu 24.04 и без прослойки PRoot — с максимальной скоростью ввода-вывода и прямым доступом к оборудованию.
-- **Ubuntu 24.04 PRoot Sandbox (для устройств без Root)**: полноценная Linux-среда на Android с GLIBC 2.39, автообновлением rootfs, сверхбыстрыми пакетными менеджерами **`uv`** (Python), **`bun`** (ARM64 JS/TS) и **`pnpm`**, а также приветствием `term-fetch`.
-- **Нативная работа с путями на всех ОС (Android, Linux, Windows, macOS)**:
-  - На **ПК (Linux / Windows / macOS)** проекты при импорте открываются **мгновенно в своей родной папке** (in-place, без копирования в `.quantum_ide/projects`), а при создании нового проекта доступна видимая папка `~/QuantumIDEProjects` и выбор любой директории через **«Обзор...»**.
-  - На карточках проектов отображается полный путь на диске и кнопка **«Показать в файловом менеджере»**.
-  - На **Android** проекты работают в быстром внутреннем хранилище `/root/projects` с прозрачной трансляцией путей между хостом и контейнером.
+### 💻 Нативный ARM64 Терминал (Conduit Engine)
+- **Движок [`conduit_vt`](packages/conduit_vt)**: быстрый VT-рендеринг, кликабельные URL, автокопирование и экранная лупа на мобильных устройствах.
+- **Нативное Linux-окружение без PRoot**: мгновенный запуск `bash`, `pkg`, `git`, `python`, `node`, `curl` на нативной скорости процессора ARM64 без оверхеда `ptrace`.
+- **Прямой доступ к проектам**: проекты хранятся в быстром внутреннем хранилище `$HOME/projects` без двойного маппинга PRoot.
 
-### 📝 Редактор, Профессиональный Git и Инструменты
-- **Профессиональный Git-клиент**: визуальный граф коммитов (`CustomPainter`), управление локальными и удалёнными ветками (создание, переключение, слияние, удаление), Stash, история коммитов с просмотром изменённых файлов и синхронизация с пользовательским фоном IDE.
-- **Quantum Editor & LSP**: автодополнение, переходы к определениям и диагностика для Dart, HTML, CSS, JavaScript, TypeScript и Python.
-- **Системный очиститель (System Cleaner)**: очистка временных кешей, логов, `pub`/Gradle-артефактов и освобождение памяти прямо из интерфейса IDE.
-
-### ⚡ Сборка APK / AAB на Android (Flutter, Java, Kotlin)
-- ✅ **Защита от вылетов (OOM / Android LMK)**: автоматический подбор безопасных лимитов памяти (`jvmHeap`, `dartHeap`, `workers`, `CMAKE_BUILD_PARALLEL_LEVEL`, `kotlin.daemon.jvm.options=-Xmx512m`) под свободную RAM устройства (`MemAvailable`).
-- ✅ **Поддержка Java и Kotlin проектов из коробки**: единая обёртка `gradlew` с нативным ARM64 `/usr/bin/aapt2`, `--console=plain`, `org.gradle.vfs.watch=false`, `in-process` компиляцией Kotlin и `Build Doctor`.
-- ✅ **Ускоренная сборка без лишних тормозов**: точечное применение флагов `Box64` только для `gen_snapshot` (без замедления OpenJDK, Gradle, R8 и C++), кэш-проверка окружения и авто-подхват нативного ARM64 `gen_snapshot` при наличии в релизах.
-- ✅ **Плавный UI во время сборки**: кэшированный разбор логов и диагностик в `BeautifulLogsViewer` и батчирование прогресса сборки без фризов интерфейса.
+### 📝 Редактор, Git и Инструменты
+- **CodeCrafter Editor & LSP Bridge**: подсветка синтаксиса, фолдинг, диагностика, inline AI-дополнение и визуальные диффы.
+- **Профессиональный Git-клиент**: граф коммитов, ветки, Stash, история изменений и интеграция с GitHub.
+- **Плавные OTA-обновления**: троттлинг прогресса (250 мс) и потоковая проверка SHA-256 без лагов интерфейса.
 
 ---
 
@@ -77,17 +72,22 @@ QuantumIDE собирается автоматически через GitHub Act
 - **State Management**: `flutter_riverpod`
 - **Routing**: `go_router`
 - **Code Editor & AI Completion**: `re_editor`, `re_highlight`, `flutter_code_crafter`
-- **Terminal & PTY**: `conduit_vt`, `flutter_pty`, Ubuntu 24.04 PRoot
+- **Terminal & Runtime**: `conduit_vt`, `flutter_pty`, **Native ARM64 Userspace (Leostryx `.so` + `pkg` + `/system/bin/linker64`)**
 - **AI & Markdown**: `roxum` Agentic Engine (`http`), `gpt_markdown`
 - **Diagnostics & Logging**: `talker_flutter`, `dart analyze`
 - **Localization**: `flutter_localizations` (RU / EN / ES / FR / ZH)
 
 ---
 
-## 📂 Актуальная структура проекта
+## 📂 Структура проекта
 
 ```text
-quantum_ide/
+quantum_ide_native/
+├── android/app/src/main/jniLibs/arm64-v8a/
+│   ├── libtermux-exec.so             # Перехват shebang (#!/usr/bin/env ...) в Bionic
+│   ├── libquantum_loader.so          # Нативный ARM64 loader из Leostryx
+│   └── liblse_compat.so              # ARMv8.0 LSE-совместимость из Leostryx
+├── assets/native_env/pkg/            # Встроенный пакетный менеджер pkg + repo.conf
 ├── lib/
 │   ├── main.dart                     # Точка входа приложения
 │   ├── app.dart                      # Конфигурация MaterialApp, тем и GoRouter
@@ -95,21 +95,17 @@ quantum_ide/
 │   │   ├── models/                   # Модели диагностики и AI-конфигураций
 │   │   ├── providers/                # Глобальные провайдеры (тема, локаль)
 │   │   ├── router/                   # Маршрутизация GoRouter
-│   │   ├── services/                 # Runtime/PRoot, LSP, Git, CodeCrafter AI, Talker, Settings
+│   │   ├── services/                 # Native ARM64 Runtime, LSP, Git, MCP, Talker, OTA Update
 │   │   ├── theme/                    # FlexColorScheme, палитры, glassmorphism
-│   │   └── utils/                    # Конвертация путей (host <-> PRoot)
+│   │   └── utils/                    # Утилиты путей и платформ
 │   ├── features/
 │   │   ├── ai_assistant/             # Roxum AI Agent (roxum/), чат-панель и MCP
-│   │   ├── collaboration/            # Live Share (совместная работа)
-│   │   ├── editor/                   # Редактор кода, вкладки, ProblemsPanel, диффы
+│   │   ├── editor/                   # Редактор кода, вкладки, @Preview, диффы
 │   │   ├── file_explorer/            # Дерево проекта, поиск, закладки
 │   │   ├── git/ & github/            # Git-клиент, граф коммитов, интеграция с GitHub
-│   │   ├── home/                     # Дашборд, шаблоны, менеджер пакетов, System Cleaner
-│   │   ├── plugins/                  # Система расширений
+│   │   ├── home/                     # Дашборд, шаблоны, System Cleaner
 │   │   ├── preview/                  # Встроенный WebView-просмотр и консоль
-│   │   ├── rest_client/              # Встроенный HTTP/REST-клиент
 │   │   └── terminal/                 # Conduit-терминал, палитры, виртуальная клавиатура
-│   ├── l10n/                         # Файлы локализации (RU/EN/ES/FR/ZH)
 │   └── shared/                       # Общие виджеты и адаптивный split-screen
 └── packages/
     ├── conduit_vt/                   # Vendored терминальный VT-движок + лупа выделения
