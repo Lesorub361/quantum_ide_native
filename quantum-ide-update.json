@@ -1,16 +1,16 @@
 {
-  "versionCode": 6,
-  "versionName": "1.0.5",
-  "notes": "## 🚀 QuantumIDE Native v1.0.5\n\n### Исправление `bad interpreter: /data/user/0/com.agyru.t2/.../bash` в `pkg`\n- Во всех 10 скриптах (`pkg`, `lib/pkg/*.sh`, `agy-fix-paths`, `agy-fix-flutter`) shebang заменён с `com.agyru.t2` на `#!/data/user/0/com.example.quantum_ide_native/files/usr/bin/bash`.\n- Добавлен чистый рецепт установки **Flutter SDK** под Native ARM64 (без Ubuntu-пакетов `libglu1-mesa` и `debianutils`, с автозапуском `agy-fix-flutter`).",
+  "versionCode": 7,
+  "versionName": "1.0.6",
+  "notes": "## 🚀 QuantumIDE Native v1.0.6\n\n### Исправление пути библиотек `pkg` (`$PREFIX/lib/pkg`)\n- В скрипте `pkg` исправлена переменная `PKG_LIB` (раньше искала `$PREFIX/bin/lib/*.sh` вместо `$PREFIX/lib/pkg/*.sh`, из-за чего падала с `ensure_dirs: command not found`).\n- В рецепт установки **Flutter SDK** добавлен пакет `dart` (`pkg install ... dart`), чтобы `agy-fix-flutter` сразу связывал нативный ARM64 Dart SDK.",
   "artifacts": {
     "online": {
-      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.5/app-arm64-v8a-release.apk",
+      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.6/app-arm64-v8a-release.apk",
       "sha256": "",
       "sizeBytes": 0
     }
   },
-  "version": "1.0.5",
-  "buildNumber": 6,
-  "tag_name": "v1.0.5",
-  "releaseNotes": "Исправлен shebang (com.agyru.t2 -> com.example.quantum_ide_native) во всех скриптах pkg и добавлен нативный рецепт установки Flutter SDK."
+  "version": "1.0.6",
+  "buildNumber": 7,
+  "tag_name": "v1.0.6",
+  "releaseNotes": "Исправлен путь PKG_LIB в пакетном менеджере pkg ($PREFIX/lib/pkg) и добавлен пакет dart в установку Flutter SDK."
 }

@@ -4,7 +4,8 @@ set -uo pipefail
 trap '' 36 37 2>/dev/null || true
 
 PKG_SELF="$(cd "$(dirname "$0")" && pwd)"
-PKG_LIB="$PKG_SELF/lib"
+PKG_LIB="${PREFIX:-$(dirname "$PKG_SELF")}/lib/pkg"
+[ -d "$PKG_LIB" ] || PKG_LIB="$PKG_SELF/lib"
 
 . "$PKG_LIB/util.sh"
 . "$PKG_LIB/version.sh"

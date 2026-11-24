@@ -206,7 +206,7 @@ class _PackageInstallDialogState extends ConsumerState<PackageInstallDialog> {
       return 'export HOME="$filesDir" PREFIX="$prefix" TMPDIR="$nativeTmp" '
           'PATH="$prefix/bin:$filesDir/bin:$filesDir/flutter/bin:\$PATH"; '
           'mkdir -p "$nativeTmp" "$prefix/bin" 2>/dev/null || true; '
-          '(pkg update || true) && pkg install git curl unzip xz-utils ca-certificates && '
+          '(pkg update || true) && pkg install git curl unzip xz-utils ca-certificates dart && '
           'git config --global --add safe.directory "*" 2>/dev/null || true; '
           'if [ -d "$filesDir/flutter/.git" ]; then '
           '  cd "$filesDir/flutter" && git fetch --depth 1 origin stable && git checkout stable -f; '
