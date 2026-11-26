@@ -1,16 +1,16 @@
 {
-  "versionCode": 7,
-  "versionName": "1.0.6",
-  "notes": "## 🚀 QuantumIDE Native v1.0.6\n\n### Исправление пути библиотек `pkg` (`$PREFIX/lib/pkg`)\n- В скрипте `pkg` исправлена переменная `PKG_LIB` (раньше искала `$PREFIX/bin/lib/*.sh` вместо `$PREFIX/lib/pkg/*.sh`, из-за чего падала с `ensure_dirs: command not found`).\n- В рецепт установки **Flutter SDK** добавлен пакет `dart` (`pkg install ... dart`), чтобы `agy-fix-flutter` сразу связывал нативный ARM64 Dart SDK.",
+  "versionCode": 8,
+  "versionName": "1.0.7",
+  "notes": "## 🚀 QuantumIDE Native v1.0.7\n\n### Архитектура нативного движка, LSP и стабильность\n- **Runtime (`ExecutionBackend`):** добавлен контракт `ExecutionBackend` (`BionicNativeBackend`, `NativeRootBackend`) с нативным окружением `$PREFIX`, `JAVA_HOME`, `ANDROID_HOME` и модулями `RuntimeCommandQueue`, `RuntimeNetworkConfig`, `SystemJunkCleaner`, `CleanupCategory`.\n- **LSP:** побайтовый `LspFrameParser` (фикс `Content-Length` для кириллицы/эмодзи) и вынос декодирования крупных JSON-RPC ответов (`> 16 KB`) в `Isolate.run`.\n- **AI-агент и DI:** вынесены `QuantumModelItem`, `ai_agent_models`, `ChatSessionStore`, централизованы `NativeChannels`, добавлены провайдеры `shizukuBridgeProvider` и `liveTelemetryServiceProvider`.\n- **Линтер и тесты:** включён `close_sinks: warning` в `analysis_options.yaml` и добавлено 9 наборов unit-тестов.",
   "artifacts": {
     "online": {
-      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.6/app-arm64-v8a-release.apk",
+      "url": "https://github.com/Lesorub361/quantum_ide_native/releases/download/v1.0.7/app-arm64-v8a-release.apk",
       "sha256": "",
       "sizeBytes": 0
     }
   },
-  "version": "1.0.6",
-  "buildNumber": 7,
-  "tag_name": "v1.0.6",
-  "releaseNotes": "Исправлен путь PKG_LIB в пакетном менеджере pkg ($PREFIX/lib/pkg) и добавлен пакет dart в установку Flutter SDK."
+  "version": "1.0.7",
+  "buildNumber": 8,
+  "tag_name": "v1.0.7",
+  "releaseNotes": "ExecutionBackend (BionicNativeBackend), побайтовый LSP-парсер с Isolate-декодированием, модули AI-агента и Runtime, централизация NativeChannels и 9 unit-тестов."
 }

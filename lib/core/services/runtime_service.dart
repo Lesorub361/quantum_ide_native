@@ -7,13 +7,17 @@ import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
+import 'package:quantum_ide/core/constants/native_channels.dart';
+import 'package:quantum_ide/core/services/runtime/execution_backend.dart';
 import 'package:quantum_ide/core/utils/path_mapper.dart';
 import 'package:quantum_ide/core/utils/platform_utils.dart';
 import 'package:quantum_ide/core/services/shizuku_bridge.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+export 'package:quantum_ide/core/services/runtime/execution_backend.dart';
+
 class RuntimeService extends ChangeNotifier {
-  static const _channel = MethodChannel('com.example.quantum_ide/native');
+  static const _channel = MethodChannel(NativeChannels.native);
 
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
